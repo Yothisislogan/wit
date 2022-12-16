@@ -1,0 +1,41 @@
+import tkinter as tk
+
+# Create the main window
+window = tk.Tk()
+window.title("Life Insurance Needs Calculator")
+
+# Define the input fields
+age_input = tk.Entry(window)
+income_input = tk.Entry(window)
+debts_input = tk.Entry(window)
+dependents_input = tk.Entry(window)
+
+# Define the calculate button
+def calculate_coverage():
+  # Get the input values from the input fields
+  age = int(age_input.get())
+  income = int(income_input.get())
+  debts = int(debts_input.get())
+  dependents = int(dependents_input.get())
+
+  # Calculate the total coverage needed using the life insurance calculator function
+  total_coverage_needed = life_insurance_calculator(age, income, debts, dependents)
+
+  # Display the result in the result label
+  result_label.config(text="Total coverage needed: $" + str(total_coverage_needed))
+
+calculate_button = tk.Button(window, text="Calculate", command=calculate_coverage)
+
+# Define the result label
+result_label = tk.Label(window, text="")
+
+# Add the input fields and buttons to the window
+age_input.pack()
+income_input.pack()
+debts_input.pack()
+dependents_input.pack()
+calculate_button.pack()
+result_label.pack()
+
+# Run the main loop
+window.mainloop()
