@@ -1,3 +1,18 @@
+# Welcome message
+print("Welcome to the Life Insurance Needs Calculator!")
+
+# Collect information from the user
+age = int(input("Please enter your age: "))
+income = int(input("Please enter your annual income: "))
+debts = int(input("Please enter the total amount of your outstanding debts: "))
+dependents = int(input("Please enter the number of dependents you have: "))
+
+# Calculate the total coverage needed using the life insurance calculator function
+total_coverage_needed = life_insurance_calculator(age, income, debts, dependents)
+
+# Display the result to the user
+print("Based on your inputs, you will need a total of $" + str(total_coverage_needed) + " in life insurance coverage to financially protect your loved ones.")
+
 import tkinter as tk
 
 # Create the main window
@@ -17,6 +32,28 @@ def calculate_coverage():
   income = int(income_input.get())
   debts = int(debts_input.get())
   dependents = int(dependents_input.get())
+  from flask import Flask, request
+import json
+
+app = Flask(__name__)
+
+@app.route('/calculate-coverage', methods=['POST'])
+def calculate_coverage():
+  # Get the input values from the request
+  age = request.form['age']
+  income = request.form['income']
+  debts = request.form['debts']
+  dependents = request.form['dependents']
+
+  # Calculate the total coverage needed using the life insurance calculator function
+  total_coverage_needed = life_insurance_calculator(age, income, debts, dependents)
+
+  # Return the result in the response
+  return json.dumps({'coverage_needed': total_coverage_needed})
+
+if __name__ == '__main__':
+  app.run()
+
 
   # Calculate the total coverage needed using the life insurance calculator function
   total_coverage_needed = life_insurance_calculator(age, income, debts, dependents)
