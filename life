@@ -1,78 +1,162 @@
-# Welcome message
-print("Welcome to the Life Insurance Needs Calculator!")
+#!/usr/bin/env python3
+"""We Insure Things: interactive life coverage explorer."""
 
-# Collect information from the user
-age = int(input("Please enter your age: "))
-income = int(input("Please enter your annual income: "))
-debts = int(input("Please enter the total amount of your outstanding debts: "))
-dependents = int(input("Please enter the number of dependents you have: "))
+from __future__ import annotations
 
-# Calculate the total coverage needed using the life insurance calculator function
-total_coverage_needed = life_insurance_calculator(age, income, debts, dependents)
-
-# Display the result to the user
-print("Based on your inputs, you will need a total of $" + str(total_coverage_needed) + " in life insurance coverage to financially protect your loved ones.")
-
-import tkinter as tk
-
-# Create the main window
-window = tk.Tk()
-window.title("Life Insurance Needs Calculator")
-
-# Define the input fields
-age_input = tk.Entry(window)
-income_input = tk.Entry(window)
-debts_input = tk.Entry(window)
-dependents_input = tk.Entry(window)
-
-# Define the calculate button
-def calculate_coverage():
-  # Get the input values from the input fields
-  age = int(age_input.get())
-  income = int(income_input.get())
-  debts = int(debts_input.get())
-  dependents = int(dependents_input.get())
-  from flask import Flask, request
-import json
-
-app = Flask(__name__)
-
-@app.route('/calculate-coverage', methods=['POST'])
-def calculate_coverage():
-  # Get the input values from the request
-  age = request.form['age']
-  income = request.form['income']
-  debts = request.form['debts']
-  dependents = request.form['dependents']
-
-  # Calculate the total coverage needed using the life insurance calculator function
-  total_coverage_needed = life_insurance_calculator(age, income, debts, dependents)
-
-  # Return the result in the response
-  return json.dumps({'coverage_needed': total_coverage_needed})
-
-if __name__ == '__main__':
-  app.run()
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Tuple
 
 
-  # Calculate the total coverage needed using the life insurance calculator function
-  total_coverage_needed = life_insurance_calculator(age, income, debts, dependents)
+@dataclass(frozen=True)
+class Profile:
+    age: int
+    income: int
+    debts: int
+    dependents: int
+    savings: int = 0
+    childcare_years: int = 0
 
-  # Display the result in the result label
-  result_label.config(text="Total coverage needed: $" + str(total_coverage_needed))
 
-calculate_button = tk.Button(window, text="Calculate", command=calculate_coverage)
+def clamp(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(value, maximum))
 
-# Define the result label
-result_label = tk.Label(window, text="")
 
-# Add the input fields and buttons to the window
-age_input.pack()
-income_input.pack()
-debts_input.pack()
-dependents_input.pack()
-calculate_button.pack()
-result_label.pack()
+def income_multiplier(age: int) -> int:
+    if age < 30:
+        return 15
+    if age < 40:
+        return 12
+    if age < 50:
+        return 10
+    if age < 60:
+        return 7
+    return 5
 
-# Run the main loop
-window.mainloop()
+
+def recommend_term_length(age: int, dependents: int) -> int:
+    baseline = 10 if dependents == 0 else 15 + dependents * 5
+    if age <= 35:
+        baseline += 5
+    return clamp(baseline, 10, 30)
+
+
+def coverage_breakdown(profile: Profile) -> Dict[str, int]:
+    income_replacement = profile.income * income_multiplier(profile.age)
+    debt_payoff = profile.debts
+    education_fund = profile.dependents * 75000
+    childcare_bridge = profile.childcare_years * 18000 * max(profile.dependents, 1)
+    final_expenses = 15000
+    emergency_buffer = max(profile.income // 2, 25000)
+    existing_assets_offset = profile.savings
+
+    return {
+        "income_replacement": income_replacement,
+        "debt_payoff": debt_payoff,
+        "education_fund": education_fund,
+        "childcare_bridge": childcare_bridge,
+        "final_expenses": final_expenses,
+        "emergency_buffer": emergency_buffer,
+        "existing_assets_offset": -existing_assets_offset,
+    }
+
+
+def life_insurance_calculator(profile: Profile) -> int:
+    breakdown = coverage_breakdown(profile)
+    return max(sum(breakdown.values()), 0)
+
+
+def scenario_analysis(profile: Profile) -> List[Tuple[str, int]]:
+    base = life_insurance_calculator(profile)
+    scenarios = [
+        ("Lean protection", int(base * 0.85)),
+        ("Balanced plan", base),
+        ("Future-proof plan", int(base * 1.15) + profile.dependents * 25000),
+    ]
+    return scenarios
+
+
+def format_money(amount: int) -> str:
+    return f"${amount:,.0f}"
+
+
+def prompt_int(label: str, minimum: int = 0, maximum: int = 10_000_000) -> int:
+    while True:
+        raw = input(label).strip().replace(",", "")
+        try:
+            value = int(raw)
+        except ValueError:
+            print("Please enter a whole number.")
+            continue
+        if not minimum <= value <= maximum:
+            print(f"Please enter a value between {minimum} and {maximum}.")
+            continue
+        return value
+
+
+def print_breakdown(breakdown: Dict[str, int]) -> None:
+    labels = {
+        "income_replacement": "Income replacement",
+        "debt_payoff": "Debt payoff",
+        "education_fund": "Education fund",
+        "childcare_bridge": "Childcare bridge",
+        "final_expenses": "Final expenses",
+        "emergency_buffer": "Emergency buffer",
+        "existing_assets_offset": "Savings offset",
+    }
+    print("\nCoverage blueprint")
+    print("-" * 56)
+    for key, value in breakdown.items():
+        sign = "-" if value < 0 else " "
+        print(f"{labels[key]:<22} {sign}{format_money(abs(value))}")
+
+
+def print_scenarios(scenarios: Iterable[Tuple[str, int]]) -> None:
+    scenario_list = list(scenarios)
+    high = max(amount for _, amount in scenario_list) if scenario_list else 1
+    print("\nScenario board")
+    print("-" * 56)
+    for label, amount in scenario_list:
+        bar_units = max(1, round((amount / high) * 24))
+        bar = "█" * bar_units
+        print(f"{label:<18} {format_money(amount):>12}  {bar}")
+
+
+def print_recommendation(profile: Profile, total_coverage: int) -> None:
+    term = recommend_term_length(profile.age, profile.dependents)
+    monthly_budget = total_coverage / 1000 * 0.45
+    risk_note = (
+        "Your profile suggests a stronger family-protection focus."
+        if profile.dependents > 0 or profile.debts > profile.income
+        else "Your profile looks lighter risk, so flexibility may matter most."
+    )
+    print("\nRecommendation")
+    print("-" * 56)
+    print(f"Suggested coverage target: {format_money(total_coverage)}")
+    print(f"Suggested term length:    {term} years")
+    print(f"Illustrative monthly cost: about {format_money(int(monthly_budget))}")
+    print(risk_note)
+
+
+def main() -> None:
+    print("✨ Welcome to We Insure Things — Life Coverage Explorer ✨")
+    print("Let's sketch a protection plan for the people who count on you.\n")
+
+    profile = Profile(
+        age=prompt_int("Age: ", 18, 90),
+        income=prompt_int("Annual income ($): ", 0),
+        debts=prompt_int("Outstanding debts ($): ", 0),
+        dependents=prompt_int("Number of dependents: ", 0, 20),
+        savings=prompt_int("Savings already available ($): ", 0),
+        childcare_years=prompt_int("Years of childcare support to model: ", 0, 25),
+    )
+
+    breakdown = coverage_breakdown(profile)
+    total_coverage = life_insurance_calculator(profile)
+
+    print_breakdown(breakdown)
+    print_scenarios(scenario_analysis(profile))
+    print_recommendation(profile, total_coverage)
+
+
+if __name__ == "__main__":
+    main()
