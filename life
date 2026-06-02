@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Tuple
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -40,11 +40,11 @@ def recommend_term_length(age: int, dependents: int) -> int:
     return clamp(baseline, 10, 30)
 
 
-def coverage_breakdown(profile: Profile) -> Dict[str, int]:
+def coverage_breakdown(profile: Profile) -> dict[str, int]:
     income_replacement = profile.income * income_multiplier(profile.age)
     debt_payoff = profile.debts
     education_fund = profile.dependents * 75000
-    childcare_bridge = profile.childcare_years * 18000 * max(profile.dependents, 1)
+    childcare_bridge = profile.childcare_years * 18000 * profile.dependents
     final_expenses = 15000
     emergency_buffer = max(profile.income // 2, 25000)
     existing_assets_offset = profile.savings
@@ -65,7 +65,7 @@ def life_insurance_calculator(profile: Profile) -> int:
     return max(sum(breakdown.values()), 0)
 
 
-def scenario_analysis(profile: Profile) -> List[Tuple[str, int]]:
+def scenario_analysis(profile: Profile) -> list[tuple[str, int]]:
     base = life_insurance_calculator(profile)
     scenarios = [
         ("Lean protection", int(base * 0.85)),
@@ -93,7 +93,7 @@ def prompt_int(label: str, minimum: int = 0, maximum: int = 10_000_000) -> int:
         return value
 
 
-def print_breakdown(breakdown: Dict[str, int]) -> None:
+def print_breakdown(breakdown: dict[str, int]) -> None:
     labels = {
         "income_replacement": "Income replacement",
         "debt_payoff": "Debt payoff",
@@ -110,7 +110,7 @@ def print_breakdown(breakdown: Dict[str, int]) -> None:
         print(f"{labels[key]:<22} {sign}{format_money(abs(value))}")
 
 
-def print_scenarios(scenarios: Iterable[Tuple[str, int]]) -> None:
+def print_scenarios(scenarios: Iterable[tuple[str, int]]) -> None:
     scenario_list = list(scenarios)
     high = max(amount for _, amount in scenario_list) if scenario_list else 1
     print("\nScenario board")
@@ -123,6 +123,7 @@ def print_scenarios(scenarios: Iterable[Tuple[str, int]]) -> None:
 
 def print_recommendation(profile: Profile, total_coverage: int) -> None:
     term = recommend_term_length(profile.age, profile.dependents)
+    # ~$0.45/month per $1,000 of coverage — industry rough average for term life
     monthly_budget = total_coverage / 1000 * 0.45
     risk_note = (
         "Your profile suggests a stronger family-protection focus."
