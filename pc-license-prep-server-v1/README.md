@@ -1,28 +1,46 @@
-# P&C License Prep Academy — Server Version V1
+# P&C License Prep Academy — Server Starter V1.1
 
-This converts the static P&C licensing study app into a server-based web app with a REST API, SQLite database, student accounts, progress tracking, quiz attempts, mistakes, study plans, admin content tools, and an optional AI tutor endpoint.
+This is a server-based starter for a general Property & Casualty licensing study app. It includes a FastAPI backend, SQLite progress tracking, mistake tracking, quiz endpoints, flashcards, a simple study plan endpoint, and a browser frontend.
 
 The course remains **general Property & Casualty only**. No state-specific content is included.
 
-## What is included
+## Current status
+
+This is a working starter, not yet a full commercial LMS. The app currently uses anonymous learner IDs stored in the browser, not real student accounts.
+
+## What is included now
 
 - FastAPI backend
 - SQLite database with automatic schema creation
-- Seeded course data
-- Student registration and login
-- Server-side sessions
+- Anonymous learner progress tracking
 - Lesson completion tracking
 - Confidence tracking
-- Saved lessons and notes
-- Quiz, diagnostic, cram, and final exam APIs
-- Mistake bank and drill mode
-- Adaptive study plan endpoint
-- Optional AI tutor endpoint
+- Lesson notes
+- Quiz/question API
+- Mistake bank API
+- Adaptive study-plan style endpoint
+- Flashcards with real definitions where available
+- Simple keyword-matched Coverage Coach endpoint
 - Static frontend served by FastAPI
+- Dockerfile
+- Render starter config
+
+## What is not included yet
+
+- student registration/login
+- server-side sessions
+- admin content editor
+- payment/subscription access
+- quiz-attempt history beyond saved mistakes
+- true OpenAI-backed tutor
+- certificates of completion
+- team dashboard
+- persistent Render disk setup or Postgres
 
 ## Quick start
 
 ```bash
+cd pc-license-prep-server-v1
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -41,28 +59,50 @@ API docs:
 http://127.0.0.1:8000/docs
 ```
 
-## Important note about course seed data
+Health check:
 
-The original generated project package includes a large `app/data/course_seed.json` with the full seeded course content. If this repo upload is missing that large file, use the latest ZIP package from the build conversation or add your own `course_seed.json` at:
+```text
+http://127.0.0.1:8000/api/health
+```
+
+## Course seed data
+
+The app now supports loading a course seed file from:
 
 ```text
 app/data/course_seed.json
 ```
 
-The server is designed so a fuller course bank can be dropped in without changing the API.
+Expected format:
+
+```json
+{
+  "modules": [],
+  "questions": [],
+  "flashcards": []
+}
+```
+
+If no seed file exists, the app uses the smaller fallback course inside `app/main.py`.
 
 ## Environment variables
 
-Copy `.env.example` to `.env` if desired.
-
 | Variable | Purpose |
 |---|---|
-| `DB_PATH` | SQLite database path |
-| `SESSION_DAYS` | Login session duration |
-| `CORS_ORIGINS` | Allowed CORS origins |
-| `OPENAI_API_KEY` | Optional API key for AI tutor |
-| `OPENAI_MODEL` | Optional AI model name |
+| `DB_PATH` | SQLite database path. Defaults to `./pc_prep.db` inside this project folder. |
+| `CORS_ORIGINS` | Comma-separated CORS origins. Defaults to `*`. |
 
-## Deployment
+## Render deployment note
 
-The repo includes a Dockerfile and Render starter config. For production, consider moving from SQLite to Postgres, adding email verification, password reset, rate limiting, and paid access controls.
+The included `render.yaml` is a starter only. On Render's normal starter setup, the app filesystem may be ephemeral. That means SQLite learner progress can be lost on redeploy or restart unless you configure persistent disk or move to Postgres.
+
+For production, move to Postgres and add real authentication before using this with paying students.
+
+## Recommended next upgrades
+
+1. Add real user accounts and login.
+2. Move SQLite to Postgres for hosted persistence.
+3. Add an admin content editor.
+4. Expand to 500+ questions and full lesson content.
+5. Connect Coverage Coach to an AI endpoint using only approved course content.
+6. Add certificates of completion and team reporting.
