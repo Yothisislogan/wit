@@ -10,26 +10,28 @@ from . import question_expander as qe
 
 # Seed loader for course content.
 def seed_course_if_empty(db: Session) -> None:
-    existing = db.scalar(select(Module.id).limit(1))
-    if existing:
-        return
     load_course(db, qe.expand_question_bank(DEFAULT_COURSE))
 
 
 def load_course(db: Session, data: dict) -> None:
     for module_data in data.get("modules", []):
-        module = Module(
-            slug=module_data["slug"],
-            title=module_data["title"],
-            description=module_data.get("description", ""),
-            sort_order=module_data.get("sort_order", 0),
-            is_active=module_data.get("is_active", True),
-        )
-        db.add(module)
-        db.flush()
+        module = db.scalar(select(Module).where(Module.slug == module_data["slug"]))
+        if not module:
+            module = Module(
+                slug=module_data["slug"],
+                title=module_data["title"],
+                description=module_data.get("description", ""),
+                sort_order=module_data.get("sort_order", 0),
+                is_active=module_data.get("is_active", True),
+            )
+            db.add(module)
+            db.flush()
 
-        lessons_by_slug = {}
+        lessons_by_slug = {lesson.slug: lesson for lesson in db.scalars(select(Lesson).where(Lesson.module_id == module.id)).all()}
         for idx, lesson_data in enumerate(module_data.get("lessons", []), start=1):
+            lesson = lessons_by_slug.get(lesson_data["slug"])
+            if lesson:
+                continue
             lesson = Lesson(
                 module_id=module.id,
                 slug=lesson_data["slug"],
@@ -47,7 +49,10 @@ def load_course(db: Session, data: dict) -> None:
             db.flush()
             lessons_by_slug[lesson.slug] = lesson
 
+        existing_terms = {term.term.lower() for term in db.scalars(select(Term).where(Term.module_id == module.id)).all()}
         for term_data in module_data.get("terms", []):
+            if term_data["term"].lower() in existing_terms:
+                continue
             lesson = lessons_by_slug.get(term_data.get("lesson_slug", ""))
             db.add(Term(
                 module_id=module.id,
@@ -57,8 +62,12 @@ def load_course(db: Session, data: dict) -> None:
                 exam_definition=term_data.get("exam_definition", ""),
                 example=term_data.get("example", ""),
             ))
+            existing_terms.add(term_data["term"].lower())
 
+        existing_question_texts = {row[0] for row in db.execute(select(Question.question_text).where(Question.module_id == module.id)).all()}
         for question_data in module_data.get("questions", []):
+            if question_data["question_text"] in existing_question_texts:
+                continue
             lesson = lessons_by_slug.get(question_data.get("lesson_slug", ""))
             question = Question(
                 module_id=module.id,
@@ -79,4 +88,5 @@ def load_course(db: Session, data: dict) -> None:
                     explanation=choice_data.get("explanation", ""),
                     sort_order=choice_data.get("sort_order", idx),
                 ))
+            existing_question_texts.add(question_data["question_text"])
     db.commit()
