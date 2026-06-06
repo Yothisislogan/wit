@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -11,20 +14,13 @@ from .settings import settings
 
 SYSTEM_PROMPT = """
 You are Coverage Coach, a friendly Property & Casualty insurance licensing study tutor.
-
-Rules:
-- Use only the supplied course context and general P&C exam-prep knowledge.
-- Keep answers state-neutral unless state-specific content is explicitly provided.
-- Do not give legal advice, binding coverage advice, or claim determinations.
-- Do not say a real-world claim is definitely covered.
-- For coverage questions, explain that policy wording, conditions, and exclusions control.
-- Prefer plain English, then include exam keywords.
-- If the student asks for state law, claims advice, or coverage certainty, redirect to general exam concepts.
-- End with one short practice question when useful.
+Use the supplied course context when available. Keep answers state-neutral. Do not give legal advice, binding coverage opinions, or claim determinations. Explain that policy wording, conditions, and exclusions control. Prefer plain English, then exam keywords. End with one short practice question when useful.
 """.strip()
 
+GUARDRAIL = "General P&C exam prep only. No state-specific legal, coverage, or claim advice."
+
 FALLBACK_RESPONSE = """
-Coverage Coach is not connected to the OpenAI API yet, but I can still help with the course context.
+Coverage Coach is in fallback mode. The course is still usable, but the local model is not reachable yet.
 
 Study tip: identify whether the question is about property, liability, auto, homeowners, commercial lines, workers compensation, crime/bonds, contracts, or ethics. Then match the facts to the correct term, coverage part, condition, or exclusion.
 """.strip()
@@ -38,10 +34,7 @@ class TutorContext:
 
 
 def _keywords(message: str) -> list[str]:
-    stop = {
-        "what", "when", "where", "why", "how", "does", "this", "that", "with", "from",
-        "about", "insurance", "coverage", "policy", "please", "explain", "help", "mean",
-    }
+    stop = {"what", "when", "where", "why", "how", "does", "this", "that", "with", "from", "about", "insurance", "coverage", "policy", "please", "explain", "help", "mean"}
     words = [w.strip(".,?!:;()[]{}\"'").lower() for w in message.split()]
     return [w for w in words if len(w) > 3 and w not in stop][:8]
 
@@ -50,38 +43,18 @@ def get_tutor_context(db: Session, user: User, message: str, limit: int = 6) -> 
     words = _keywords(message)
     lesson_stmt = select(Lesson).where(Lesson.is_active == True)
     term_stmt = select(Term)
-
     if words:
         lesson_filters = []
         term_filters = []
         for word in words:
-            pattern = f"%{word}%"
-            lesson_filters.extend([
-                Lesson.title.ilike(pattern),
-                Lesson.summary.ilike(pattern),
-                Lesson.body.ilike(pattern),
-                Lesson.example.ilike(pattern),
-            ])
-            term_filters.extend([
-                Term.term.ilike(pattern),
-                Term.plain_english_definition.ilike(pattern),
-                Term.exam_definition.ilike(pattern),
-                Term.example.ilike(pattern),
-            ])
+            pat = f"%{word}%"
+            lesson_filters.extend([Lesson.title.ilike(pat), Lesson.summary.ilike(pat), Lesson.body.ilike(pat), Lesson.example.ilike(pat)])
+            term_filters.extend([Term.term.ilike(pat), Term.plain_english_definition.ilike(pat), Term.exam_definition.ilike(pat), Term.example.ilike(pat)])
         lesson_stmt = lesson_stmt.where(or_(*lesson_filters))
         term_stmt = term_stmt.where(or_(*term_filters))
-
     lessons = list(db.scalars(lesson_stmt.order_by(Lesson.sort_order, Lesson.id).limit(limit)).all())
     terms = list(db.scalars(term_stmt.order_by(Term.term).limit(limit)).all())
-    mistakes = list(
-        db.scalars(
-            select(MistakeBank)
-            .options(selectinload(MistakeBank.question).selectinload(Question.choices))
-            .where(MistakeBank.user_id == user.id)
-            .order_by(MistakeBank.times_missed.desc())
-            .limit(3)
-        ).all()
-    )
+    mistakes = list(db.scalars(select(MistakeBank).options(selectinload(MistakeBank.question).selectinload(Question.choices)).where(MistakeBank.user_id == user.id).order_by(MistakeBank.times_missed.desc()).limit(3)).all())
     return TutorContext(lessons=lessons, terms=terms, mistakes=mistakes)
 
 
@@ -107,34 +80,39 @@ def format_context(ctx: TutorContext) -> str:
     return "\n".join(parts).strip()
 
 
-def fallback_answer(ctx: TutorContext, message: str) -> dict[str, Any]:
+def _strip_think(text: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+
+
+def _call_ollama(system: str, user_prompt: str) -> str:
+    url = settings.ollama_base_url.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": settings.ollama_model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": settings.ollama_max_tokens,
+        "stream": False,
+    }
+    with httpx.Client(timeout=90.0) as client:
+        response = client.post(url, json=payload)
+        response.raise_for_status()
+    data = response.json()
+    return _strip_think(data["choices"][0]["message"]["content"])
+
+
+def _fallback_answer(ctx: TutorContext) -> dict[str, Any]:
     context = format_context(ctx)
+    answer = FALLBACK_RESPONSE
     if context:
         answer = f"{FALLBACK_RESPONSE}\n\nRelevant course notes:\n{context[:1800]}"
-    else:
-        answer = FALLBACK_RESPONSE
-    return {
-        "answer": answer,
-        "mode": "fallback",
-        "model": None,
-        "used_course_context": bool(context),
-        "guardrail": "General P&C exam prep only. No state-specific legal, coverage, or claim advice.",
-    }
+    return {"answer": answer, "mode": "fallback", "model": None, "used_course_context": bool(context), "guardrail": GUARDRAIL}
 
 
 def ask_coverage_coach(db: Session, user: User, message: str) -> dict[str, Any]:
     ctx = get_tutor_context(db, user, message)
     course_context = format_context(ctx)
-
-    if not settings.openai_api_key:
-        return fallback_answer(ctx, message)
-
-    try:
-        from openai import OpenAI
-    except Exception:
-        return fallback_answer(ctx, message)
-
-    client = OpenAI(api_key=settings.openai_api_key)
     prompt = f"""
 Student question:
 {message}
@@ -144,18 +122,37 @@ Approved course context:
 
 Answer as Coverage Coach. Be concise, helpful, and exam-focused.
 """.strip()
+    try:
+        answer = _call_ollama(SYSTEM_PROMPT, prompt)
+        return {"answer": answer, "mode": "ollama", "model": settings.ollama_model, "used_course_context": bool(course_context), "guardrail": GUARDRAIL}
+    except Exception:
+        return _fallback_answer(ctx)
 
-    response = client.responses.create(
-        model=settings.openai_model,
-        instructions=SYSTEM_PROMPT,
-        input=prompt,
-        max_output_tokens=settings.openai_max_output_tokens,
-    )
-    answer = getattr(response, "output_text", None) or "Coverage Coach could not generate an answer. Try rephrasing the question."
-    return {
-        "answer": answer,
-        "mode": "openai",
-        "model": settings.openai_model,
-        "used_course_context": bool(course_context),
-        "guardrail": "General P&C exam prep only. No state-specific legal, coverage, or claim advice.",
+
+def generate_studio_content(action: str, module_title: str, terms: list[dict], lessons: list[dict]) -> dict[str, Any]:
+    context = {
+        "module": module_title,
+        "lessons": lessons[:8],
+        "terms": terms[:25],
     }
+    if action == "cram_sheet":
+        return {"action": action, "module": module_title, "terms": terms}
+
+    instructions = {
+        "study_guide": "Create a concise study guide with key ideas, memory tips, and 5 review bullets.",
+        "practice_quiz": "Create exactly 5 multiple-choice questions. Return JSON with a questions array; each item has q, choices, correct, explanation.",
+        "concept_map": "Create a text-based concept map connecting the module's lessons and terms.",
+    }.get(action, "Create a useful study output for this module.")
+
+    try:
+        text = _call_ollama(SYSTEM_PROMPT, f"{instructions}\n\nCourse context JSON:\n{json.dumps(context, ensure_ascii=False)}")
+        if action == "practice_quiz":
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict) and isinstance(parsed.get("questions"), list):
+                    return {"action": action, "module": module_title, "questions": parsed["questions"][:5]}
+            except Exception:
+                pass
+        return {"action": action, "module": module_title, "content": text}
+    except Exception as exc:
+        return {"action": action, "module": module_title, "error": str(exc)[:180]}
