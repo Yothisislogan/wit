@@ -8,14 +8,135 @@ async function boot(){const m=await api('/api/me');me=m.user;if(!me){return logi
 async function loginScreen(){const p=await api('/auth/providers');app.innerHTML=`<section class="login card"><div class="eyebrow">Free public access</div><h1>Sign in to save your progress</h1><p class="muted">Use Google, Microsoft, or Facebook. Local development can use the demo login.</p>${p.providers.map(x=>`<a class="provider" href="/auth/login/${x.id}"><button class="primary provider" ${x.configured?'':'disabled'}>Continue with ${esc(x.name)}${x.configured?'':' — not configured'}</button></a>`).join('')}${p.dev_login_enabled?'<a class="provider" href="/auth/dev-login"><button class="ghost provider">Development Login</button></a>':''}</section>`}
 async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
 function sourcePanel(){return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
-function chatPanel(){const defaultIntro=`<div class="message assistant intro"><p>Once unzipped, you can upload the individual files—like <strong>PDFs, Google Docs, or even text files</strong>—using the <strong>Source Panel</strong> on the left. You can also add website links or YouTube URLs if those are part of your project!</p><p>By uploading these sources, I can help you summarize the contents, find specific details, or even generate a <strong>Study Guide</strong> or <strong>Audio Overview</strong> to help you process everything quickly.</p><p>What kind of files do you have inside that ZIP folder? I'd be happy to help you figure out the best way to bring them in!</p><div class="note-actions"><button class="ghost">⚑ Save to note</button><button class="icon-btn">▥</button><button class="icon-btn">👍</button><button class="icon-btn">👎</button></div></div>`;return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('I have a mix of PDFs and text files')">I have a mix of PDFs and text files</button><button onclick="quickAsk('Can you explain how to add website links instead?')">Can you explain how to add website links instead?</button><button onclick="quickAsk('How many files can I upload to one notebook?')">How many files can I upload to one notebook?</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div></div></section>`}
-function studioPanel(){return `<aside class="pane"><div class="pane-head"><h2>Studio</h2><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><div class="studio-grid"><button class="studio-tile tile-audio" onclick="studio('audio')"><span>▥<br>Audio Overview</span><b>›</b></button><button class="studio-tile tile-deck" onclick="studio('deck')"><span>▤<br>Slide Deck</span><b>›</b></button><button class="studio-tile tile-video" onclick="studio('video')"><span>▣<br>Video Overview</span><b>›</b></button><button class="studio-tile tile-map" onclick="studio('map')"><span>⌘<br>Mind Map</span><b>›</b></button><button class="studio-tile tile-report" onclick="studio('report')"><span>⇱<br>Reports</span><b>›</b></button><button class="studio-tile tile-flash" onclick="route('terms')"><span>▧<br>Flashcards</span><b>›</b></button><button class="studio-tile tile-quiz" onclick="route('quiz')"><span>▢<br>Quiz</span><b>›</b></button><button class="studio-tile tile-info" onclick="studio('infographic')"><span>▥<br>Infographic</span><b>›</b></button><button class="studio-tile tile-data" onclick="studio('data')"><span>▦<br>Data Table</span><b>›</b></button></div><div class="studio-output" id="studioOutput"><div><div class="spark">✦</div><strong>Studio output will be saved here.</strong><p>After adding sources, click to add Audio Overview, Study Guide, Mind Map, and more!</p><button class="primary" onclick="quickAsk('Create a study guide for the Property and Casualty licensing course.')">▣ Add note</button></div></div></div></aside>`}
+function chatPanel(){const defaultIntro=`<div class="message assistant intro"><p>Once unzipped, you can upload the individual files—like <strong>PDFs, Google Docs, or even text files</strong>—using the <strong>Source Panel</strong> on the left. You can also add website links or YouTube URLs if those are part of your project!</p><p>By uploading these sources, I can help you summarize the contents, find specific details, or even generate a <strong>Study Guide</strong> or <strong>Practice Quiz</strong> to help you process everything quickly.</p><p>What kind of files do you have inside that ZIP folder? I'd be happy to help you figure out the best way to bring them in!</p><div class="note-actions"><button class="ghost">⚑ Save to note</button><button class="icon-btn">▥</button><button class="icon-btn">👍</button><button class="icon-btn">👎</button></div></div>`;return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('I have a mix of PDFs and text files')">I have a mix of PDFs and text files</button><button onclick="quickAsk('Can you explain how to add website links instead?')">Can you explain how to add website links instead?</button><button onclick="quickAsk('How many files can I upload to one notebook?')">How many files can I upload to one notebook?</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div></div></section>`}
+function studioPanel(){
+  const opts=modules.map(m=>`<option value="${esc(m.slug)}"${m.slug===studioModuleSlug?' selected':''}>${esc(m.title)}</option>`).join('');
+  return `<aside class="pane"><div class="pane-head"><h2>Studio</h2>
+  <select id="studioModuleSelect" class="studio-module-select" onchange="studioModuleSlug=this.value">
+    <option value="">— pick a module —</option>${opts}
+  </select></div>
+  <div class="pane-body">
+  <div class="studio-grid">
+    <button class="studio-tile tile-guide" onclick="studio('study_guide')"><span>◈<br>Study Guide</span><b>›</b></button>
+    <button class="studio-tile tile-quiz"  onclick="studio('practice_quiz')"><span>✎<br>Practice Quiz</span><b>›</b></button>
+    <button class="studio-tile tile-cram"  onclick="studio('cram_sheet')"><span>⚡<br>Cram Sheet</span><b>›</b></button>
+    <button class="studio-tile tile-map"   onclick="studio('concept_map')"><span>⌘<br>Concept Map</span><b>›</b></button>
+    <button class="studio-tile tile-flash" onclick="route('terms')"><span>▧<br>Flashcards</span><b>›</b></button>
+    <button class="studio-tile tile-exam"  onclick="route('quiz',studioModuleSlug||undefined)"><span>▢<br>Exam Sim</span><b>›</b></button>
+  </div>
+  <div class="studio-output" id="studioOutput">
+    <div class="studio-empty"><div class="spark">✦</div>
+    <strong>Pick a module and a tile to generate study content.</strong>
+    <p>Study Guide and Practice Quiz use Coverage Coach (Ollama). Cram Sheet is instant.</p></div>
+  </div></div></aside>`}
 async function workspace(){app.innerHTML=`<div class="workspace"><div class="ws-topbar"><button class="ws-back-btn" onclick="showDashboard()">← Dashboard</button><span class="ws-topbar-title">◈ Study Workspace</span></div><div class="ws-panels">${sourcePanel()}${chatPanel()}${studioPanel()}</div></div>`;scrollMessages();if(typeof studioModuleSlug!=='undefined'&&!studioModuleSlug&&modules.length){studioModuleSlug=modules[0].slug;const sel=document.getElementById('studioModuleSelect');if(sel)sel.value=studioModuleSlug;}}
 function scrollMessages(){setTimeout(()=>{const el=document.getElementById('messages');if(el)el.scrollTop=el.scrollHeight},50)}
 function quickAsk(text){const q=document.getElementById('coachQuestion');if(q){q.value=text;askCoach()}else{chatMessages.push({role:'user',text});route('dashboard').then(()=>askCoachText(text))}}
 async function askCoach(){const box=document.getElementById('coachQuestion');const message=(box?.value||'').trim();if(!message){toast('Ask a question first');return}box.value='';await askCoachText(message)}
 async function askCoachText(message){chatMessages.push({role:'user',text:message});await workspace();chatMessages.push({role:'assistant',text:'Coverage Coach is thinking...'});await workspace();const out=await api('/api/tutor/ask',{method:'POST',body:JSON.stringify({message})});chatMessages.pop();chatMessages.push({role:'assistant',text:out.answer});await workspace();toast((out.mode||'coach')==='openai'?'Answered with Coverage Coach':'Answered in fallback mode')}
-async function studio(kind){const out=document.getElementById('studioOutput');if(!out)return;const content={audio:'Create an audio-style summary of the next best topic I should study.',deck:'Create a slide deck outline for the core P&C modules.',video:'Create a short video overview script for general P&C licensing prep.',map:'Create a mind map of the P&C course modules.',report:'Summarize my study progress and weak areas.',infographic:'Create an infographic outline for risk, peril, hazard, and insurance contracts.',data:'Create a table of modules, lessons, and study priority.'}[kind]||'Create a study output.';out.innerHTML=`<div><div class="spark">✦</div><strong>${esc(kind.toUpperCase())}</strong><p>${esc(content)}</p><button class="primary" onclick="quickAsk('${esc(content)}')">Generate in Chat</button></div>`}
+function studio(action){
+  const out=document.getElementById('studioOutput');
+  if(!out)return;
+  if(!studioModuleSlug){
+    out.innerHTML='<div class="studio-msg studio-warn">⚠ Pick a module from the dropdown above first.</div>';
+    return;
+  }
+  const TITLES={study_guide:'Generating Study Guide…',practice_quiz:'Generating Practice Quiz…',cram_sheet:'Loading Cram Sheet…',concept_map:'Generating Concept Map…'};
+  out.innerHTML=`<div class="studio-loading"><div class="studio-spinner"></div><p>${TITLES[action]||'Working…'}</p><small>Coverage Coach is thinking — may take 30–60s.</small></div>`;
+  api('/api/studio/generate','POST',{action,module_slug:studioModuleSlug})
+    .then(data=>{
+      if(action==='study_guide')        renderStudyGuide(out,data);
+      else if(action==='practice_quiz') renderPracticeQuiz(out,data);
+      else if(action==='cram_sheet')    renderCramSheet(out,data);
+      else if(action==='concept_map')   renderConceptMap(out,data);
+      else out.innerHTML=`<pre>${esc(JSON.stringify(data,null,2))}</pre>`;
+    })
+    .catch(err=>{ out.innerHTML=`<div class="studio-msg studio-error">Error: ${esc(String(err))}</div>`; });
+}
+
+function _mdToHtml(text){
+  if(!text)return '';
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^## (.+)$/gm,'<h3 class="studio-h3">$1</h3>')
+    .replace(/^### (.+)$/gm,'<h4 class="studio-h4">$1</h4>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/^- (.+)$/gm,'<li>$1</li>')
+    .replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>')
+    .replace(/<\/ul>\s*<ul>/g,'')
+    .replace(/\n{2,}/g,'<br>').replace(/\n/g,' ');
+}
+
+function renderStudyGuide(out,data){
+  if(data.error){out.innerHTML=`<div class="studio-msg studio-error">Coverage Coach error: ${esc(data.error)}</div>`;return;}
+  out.innerHTML=`<div class="studio-doc">
+    <div class="studio-doc-header"><span class="studio-tag">Study Guide</span><span class="studio-module-label">${esc(data.module)}</span></div>
+    <div class="studio-doc-body">${_mdToHtml(data.content)}</div>
+  </div>`;
+}
+
+function renderCramSheet(out,data){
+  if(!data.terms||!data.terms.length){out.innerHTML='<div class="studio-msg">No terms found for this module.</div>';return;}
+  const rows=data.terms.map(t=>`<tr><td class="cram-term">${esc(t.term)}</td><td class="cram-def">${esc(t.exam_definition)}<small class="cram-ex"> ${esc(t.example||'')}</small></td></tr>`).join('');
+  out.innerHTML=`<div class="studio-doc">
+    <div class="studio-doc-header"><span class="studio-tag">Cram Sheet</span><span class="studio-module-label">${esc(data.module)}</span><span class="studio-count">${data.terms.length} terms</span></div>
+    <table class="cram-table"><thead><tr><th>Term</th><th>Exam Definition + Example</th></tr></thead><tbody>${rows}</tbody></table>
+  </div>`;
+}
+
+function renderConceptMap(out,data){
+  if(data.error){out.innerHTML=`<div class="studio-msg studio-error">Coverage Coach error: ${esc(data.error)}</div>`;return;}
+  out.innerHTML=`<div class="studio-doc">
+    <div class="studio-doc-header"><span class="studio-tag">Concept Map</span><span class="studio-module-label">${esc(data.module)}</span></div>
+    <pre class="concept-map-box">${esc(data.content||'')}</pre>
+  </div>`;
+}
+
+function renderPracticeQuiz(out,data){
+  if(data.error||!data.questions||!data.questions.length){
+    out.innerHTML=`<div class="studio-msg studio-error">${esc(data.error||'No questions generated. Make sure Ollama is running and try again.')}</div>`;return;
+  }
+  studioQuizState=data.questions.map(()=>null);
+  const cards=data.questions.map((q,qi)=>{
+    const choices=q.choices.map((c,ci)=>`<button class="qchoice" id="qc-${qi}-${ci}" onclick="answerQ(${qi},${ci})">${String.fromCharCode(65+ci)}. ${esc(c)}</button>`).join('');
+    return `<div class="quiz-card" id="qcard-${qi}">
+      <p class="quiz-q"><strong>${qi+1}.</strong> ${esc(q.q)}</p>
+      <div class="quiz-choices" id="qchoices-${qi}">${choices}</div>
+      <div class="quiz-feedback" id="qfeedback-${qi}"></div>
+    </div>`;
+  }).join('');
+  out.innerHTML=`<div class="studio-doc">
+    <div class="studio-doc-header"><span class="studio-tag">Practice Quiz</span><span class="studio-module-label">${esc(data.module)}</span><span class="studio-count" id="quiz-score-lbl">0 / ${data.questions.length}</span></div>
+    <div id="practice-quiz-cards">${cards}</div>
+  </div>`;
+  out._quizData=data.questions;
+}
+
+function answerQ(qi,ci){
+  const out=document.getElementById('studioOutput');
+  if(!out||studioQuizState[qi]!==null)return;
+  const q=out._quizData[qi];
+  studioQuizState[qi]=ci;
+  const isCorrect=ci===q.correct;
+  const chosen=document.getElementById(`qc-${qi}-${ci}`);
+  const correct=document.getElementById(`qc-${qi}-${q.correct}`);
+  if(chosen)chosen.classList.add(isCorrect?'qchoice-correct':'qchoice-wrong');
+  if(!isCorrect&&correct)correct.classList.add('qchoice-correct');
+  [0,1,2,3].forEach(i=>{const b=document.getElementById(`qc-${qi}-${i}`);if(b)b.disabled=true;});
+  const fb=document.getElementById(`qfeedback-${qi}`);
+  if(fb)fb.innerHTML=`<div class="qfeedback-box ${isCorrect?'qfb-correct':'qfb-wrong'}">${isCorrect?'✓ Correct':'✗ Incorrect'} — ${esc(q.explanation||'')}</div>`;
+  const answered=studioQuizState.filter(s=>s!==null).length;
+  const correctCount=studioQuizState.filter((s,i)=>s===out._quizData[i]?.correct).length;
+  const lbl=document.getElementById('quiz-score-lbl');
+  if(lbl)lbl.textContent=`${correctCount} / ${out._quizData.length}`;
+  if(answered===out._quizData.length){
+    const pct=Math.round(correctCount/out._quizData.length*100);
+    const summary=document.createElement('div');
+    summary.className=`studio-msg ${pct>=80?'studio-pass':'studio-fail'}`;
+    summary.textContent=`Quiz complete: ${correctCount}/${out._quizData.length} correct (${pct}%) ${pct>=80?'✓ Ready for this topic!':'— Review the module and try again.'}`;
+    document.getElementById('practice-quiz-cards').appendChild(summary);
+  }
+}
 async function showModules(){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Course Sources</h1><p class="muted">These are your built-in P&C study sources.</p><div class="grid">${modules.map(m=>`<div class="card"><div class="eyebrow">${m.lesson_count} lessons</div><h2>${esc(m.title)}</h2><p class="muted">${esc(m.description)}</p><button onclick="route('module','${m.slug}')">Open</button></div>`).join('')}</div></div></div>`}
 async function showModule(slug){const m=await api('/api/modules/'+slug);app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description)}</p><div class="list">${m.lessons.map(l=>`<div class="row"><div><strong>${esc(l.title)}</strong><br><span class="muted">${esc(l.summary)}</span></div><button onclick="route('lesson','${l.slug}')">Study</button></div>`).join('')}</div><div class="toolbar"><button onclick="route('quiz','${m.slug}')">Quiz This Module</button><button onclick="quickAsk('Explain the ${esc(m.title)} module and quiz me on it.')">Ask Coverage Coach</button></div></div></div>`}
 async function showLesson(slug){const l=await api('/api/lessons/'+slug);app.innerHTML=`<div class="page-wrap"><article class="lesson card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(l.title)}</h1><p class="muted">${esc(l.summary)}</p><p>${esc(l.body)}</p>${l.example?`<h3>Example</h3><p>${esc(l.example)}</p>`:''}${l.memory_tip?`<h3>Memory tip</h3><p>${esc(l.memory_tip)}</p>`:''}<h3>Key terms</h3><p>${l.terms.map(t=>`<span class="term" title="${esc(t.plain_english_definition)}">${esc(t.term)}</span>`).join('')||'<span class="muted">No terms yet.</span>'}</p><label>Confidence</label><select id="confidence"><option value="1">Need review</option><option value="2">Getting it</option><option value="3">Strong</option></select><label>Notes</label><textarea id="notes" placeholder="Study notes..."></textarea><div class="toolbar"><button class="primary" onclick="saveProgress(${l.id})">Mark Complete</button><button onclick="speak('${esc((l.audio_script||l.body).replace(/`/g,''))}')">Listen</button><button onclick="quickAsk('Explain the lesson ${esc(l.title)} and give me one practice question.')">Ask Coverage Coach</button></div></article></div>`}
