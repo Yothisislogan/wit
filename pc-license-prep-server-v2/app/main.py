@@ -400,10 +400,11 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     # 40% lesson completion + 40% quiz average + 20% mistake factor
     lesson_pct = round(len(completed_ids) / max(total_lessons, 1) * 100)
     mistake_penalty = min(mistake_count * 2, 20)
-    readiness = min(100, round(lesson_pct * 0.4 + avg_quiz * 0.4 + max(0, 20 - mistake_penalty)))
+    readiness = min(100, round(lesson_pct * 0.5 + avg_quiz * 0.5 - mistake_penalty))
+    readiness = max(0, readiness)
 
     return {
-        "user": user.display_name or user.email or "Candidate",
+        "user": user.name or user.email or "Candidate",
         "readiness": readiness,
         "lessons": {
             "total": total_lessons,
