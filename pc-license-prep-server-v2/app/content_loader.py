@@ -3,14 +3,16 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .course_seed import DEFAULT_COURSE
-from .models import AnswerChoice, Lesson, Module, Question, Term
 from . import question_expander as qe
+from .course_seed import DEFAULT_COURSE
+from .course_seed_enrichment import enrich_course
+from .models import AnswerChoice, Lesson, Module, Question, Term
 
 
 # Seed loader for course content.
 def seed_course_if_empty(db: Session) -> None:
-    load_course(db, qe.expand_question_bank(DEFAULT_COURSE))
+    enriched_course = enrich_course(DEFAULT_COURSE)
+    load_course(db, qe.expand_question_bank(enriched_course))
 
 
 def load_course(db: Session, data: dict) -> None:
