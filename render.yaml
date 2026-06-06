@@ -17,8 +17,12 @@ services:
         fromDatabase:
           name: pc-license-prep-db
           property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
       - key: OLLAMA_BASE_URL
-        value: http://your-ollama-server:11434/v1
+        sync: false
       - key: OLLAMA_MODEL
         value: deepseek-r1:7b
       - key: OLLAMA_MAX_TOKENS
