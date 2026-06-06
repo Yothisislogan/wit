@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P&C License Prep Academy</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <button class="brand" onclick="route('dashboard')">
+      <span class="mark">WIT</span>
+      <span><strong>P&C License Prep Academy</strong><small>Free public study platform</small></span>
+    </button>
+    <nav>
+      <button onclick="route('dashboard')">Dashboard</button>
+      <button onclick="route('modules')">Modules</button>
+      <button onclick="route('terms')">Glossary</button>
+      <button onclick="route('quiz')">Quiz</button>
+      <button onclick="logout()">Logout</button>
+    </nav>
+  </header>
+  <main id="app" class="shell"></main>
+  <div id="toast" class="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
