@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-TARGET_QUESTIONS_PER_MODULE = 75
+# Question-bank volume targets.
+# 14 modules at these settings produces roughly:
+# baseline 1,050 + scenario 350 + hard 140 + final simulation 100 = 1,640 questions.
+BASELINE_QUESTIONS_PER_MODULE = 75
+SCENARIO_QUESTIONS_PER_MODULE = 25
+HARD_QUESTIONS_PER_MODULE = 10
+FINAL_EXAM_SIMULATION_QUESTIONS = 100
 
 GENERIC_DISTRACTORS = [
     ("It means every possible loss is automatically covered.", "No insurance policy automatically covers every possible loss."),
@@ -10,6 +16,23 @@ GENERIC_DISTRACTORS = [
     ("It is mainly a life insurance concept.", "This question is about general property and casualty insurance."),
     ("It removes the need to read the policy.", "Coverage depends on the actual policy terms, conditions, and exclusions."),
     ("It is the same thing as a premium payment.", "Premium is the price paid for coverage, not the concept being tested."),
+]
+
+SCENARIO_SETUPS = [
+    "A customer gives a short claim story and asks which concept applies.",
+    "A candidate must identify the key policy concept from a fact pattern.",
+    "An insured asks why a claim may depend on policy wording.",
+    "A producer is explaining coverage basics to a new client.",
+    "A practice exam question includes extra facts that may distract the candidate.",
+]
+
+HARD_CLUES = [
+    "except",
+    "not",
+    "best",
+    "most likely",
+    "first",
+    "only if supported by policy language",
 ]
 
 
@@ -29,12 +52,31 @@ def _ordered(correct: tuple[str, str], wrongs: list[tuple[str, str]], rotate: in
     return [_choice(text, ok, exp, idx + 1) for idx, (text, ok, exp) in enumerate(raw)]
 
 
+def _terms(module: dict) -> list[dict]:
+    return module.get("terms", []) or [{
+        "term": module["title"],
+        "plain_english_definition": module["description"],
+        "exam_definition": module["description"],
+        "example": module["description"],
+    }]
+
+
+def _lessons(module: dict) -> list[dict]:
+    return module.get("lessons", []) or [{
+        "slug": module["slug"],
+        "title": module["title"],
+        "summary": module["description"],
+        "body": module["description"],
+        "memory_tip": module["description"],
+    }]
+
+
 def _other_term_names(module: dict, current: str) -> list[str]:
-    names = [t["term"] for t in module.get("terms", []) if t["term"] != current]
+    names = [t["term"] for t in _terms(module) if t["term"] != current]
     return names or ["Premium", "Deductible", "Exclusion"]
 
 
-def _term_question(module: dict, lesson_slug: str, term: dict, number: int) -> dict:
+def _term_question(module: dict, lesson_slug: str, term: dict, number: int, bank_label: str = "baseline") -> dict:
     variant = number % 15
     term_name = term["term"]
     others = _other_term_names(module, term_name)
@@ -67,7 +109,7 @@ def _term_question(module: dict, lesson_slug: str, term: dict, number: int) -> d
         wrongs = [generic] + wrong_terms
     elif variant == 5:
         prompt = f"In the {module['title']} module, why is {term_name} important?"
-        correct = ("It helps identify what the question is really testing.", "Correct. Key terms are clues to the coverage concept being tested." )
+        correct = ("It helps identify what the question is really testing.", "Correct. Key terms are clues to the coverage concept being tested.")
         wrongs = [generic] + wrong_terms
     elif variant == 6:
         prompt = f"Which answer best applies {term_name} to a real insurance situation?"
@@ -108,7 +150,7 @@ def _term_question(module: dict, lesson_slug: str, term: dict, number: int) -> d
 
     return {
         "lesson_slug": lesson_slug,
-        "question_text": f"[{module['title']}] {prompt}",
+        "question_text": f"[{bank_label.upper()}][{module['title']}] {prompt}",
         "question_type": "scenario" if variant in {2, 6, 10} else "multiple_choice",
         "difficulty": "beginner" if variant in {0, 1, 8, 14} else "standard",
         "explanation": term["exam_definition"],
@@ -116,7 +158,7 @@ def _term_question(module: dict, lesson_slug: str, term: dict, number: int) -> d
     }
 
 
-def _lesson_question(module: dict, lesson: dict, number: int) -> dict:
+def _lesson_question(module: dict, lesson: dict, number: int, bank_label: str = "baseline") -> dict:
     variant = number % 15
     title = lesson["title"]
     summary = lesson.get("summary") or lesson.get("body", "").split(".")[0] + "."
@@ -176,7 +218,7 @@ def _lesson_question(module: dict, lesson: dict, number: int) -> dict:
     ]
     return {
         "lesson_slug": lesson["slug"],
-        "question_text": f"[{module['title']}] {prompt}",
+        "question_text": f"[{bank_label.upper()}][{module['title']}] {prompt}",
         "question_type": "scenario" if variant in {8, 11} else "multiple_choice",
         "difficulty": "exam_style" if variant in {3, 6, 12} else "standard",
         "explanation": body,
@@ -184,32 +226,132 @@ def _lesson_question(module: dict, lesson: dict, number: int) -> dict:
     }
 
 
-def expand_question_bank(course: dict, target_per_module: int = TARGET_QUESTIONS_PER_MODULE) -> dict:
+def _scenario_question(module: dict, lesson: dict, term: dict, number: int) -> dict:
+    setup = SCENARIO_SETUPS[number % len(SCENARIO_SETUPS)]
+    prompt = (
+        f"[SCENARIO][{module['title']}] {setup} The fact pattern says: {term['example']} "
+        f"Which answer best connects this fact pattern to {lesson['title']}?"
+    )
+    correct = (term["term"], f"Correct. The scenario points to {term['term']}: {term['exam_definition']}")
+    wrongs = [
+        ("Assume the loss is covered without reading the policy.", "Coverage cannot be assumed without policy language."),
+        ("Treat it as a state-specific law question.", "This is testing the general P&C concept in the scenario."),
+        ("Ignore the described fact pattern and choose the broadest sounding answer.", "Scenario questions require matching the facts to the concept."),
+    ]
+    return {
+        "lesson_slug": lesson["slug"],
+        "question_text": prompt,
+        "question_type": "scenario",
+        "difficulty": "challenging" if number % 3 == 0 else "standard",
+        "explanation": f"Scenario review: {term['term']} means {term['exam_definition']}",
+        "choices": _ordered(correct, wrongs, number),
+    }
+
+
+def _hard_question(module: dict, lesson: dict, term: dict, number: int) -> dict:
+    clue = HARD_CLUES[number % len(HARD_CLUES)]
+    prompt = (
+        f"[HARD][{module['title']}] Which answer is the {clue} answer about {term['term']} "
+        f"when applying the lesson '{lesson['title']}'?"
+    )
+    if clue in {"except", "not"}:
+        correct = ("It means the policy will respond to every loss, regardless of exclusions.", "Correct. That statement is inaccurate; exclusions and conditions still matter.")
+        wrongs = [
+            (term["plain_english_definition"], "This is a fair description, so it is not the best answer to an EXCEPT/NOT question."),
+            (term["exam_definition"], "This is consistent with the term."),
+            (f"Example: {term['example']}", "This example is consistent with the term."),
+        ]
+    else:
+        correct = ("Read the policy concept, identify the tested term, then eliminate answers with unsupported absolutes.", "Correct. This is the safest hard-question method.")
+        wrongs = [
+            ("Pick the answer that sounds most customer-friendly.", "Exam answers must match policy concepts, not only fairness."),
+            ("Assume broad coverage unless the question says otherwise.", "Insurance questions require specific policy support."),
+            ("Ignore words like not, except, always, and only.", "Those words often change the entire question."),
+        ]
+    return {
+        "lesson_slug": lesson["slug"],
+        "question_text": prompt,
+        "question_type": "multiple_choice",
+        "difficulty": "exam_style",
+        "explanation": f"Hard question strategy: watch clue words like {', '.join(HARD_CLUES)}.",
+        "choices": _ordered(correct, wrongs, number),
+    }
+
+
+def _final_exam_question(module: dict, lesson: dict, term: dict, number: int) -> dict:
+    prompt = (
+        f"[FINAL SIM][Q{number + 1}] A licensing candidate sees a mixed question from {module['title']}. "
+        f"It references {term['term']} and the lesson '{lesson['title']}'. What is the best answer?"
+    )
+    correct = (term["exam_definition"], f"Correct. The final exam simulation is testing {term['term']} in context.")
+    wrongs = [
+        ("Choose the broadest answer because insurance is designed to cover all losses.", "Insurance does not cover all losses; policy wording controls."),
+        ("Ignore the lesson topic and focus only on the longest answer.", "The longest answer is not automatically correct."),
+        ("Treat it as a life and health question.", "This course is testing property and casualty concepts."),
+    ]
+    return {
+        "lesson_slug": lesson["slug"],
+        "question_text": prompt,
+        "question_type": "final_exam",
+        "difficulty": "exam_style",
+        "explanation": f"Final review: {term['term']} means {term['exam_definition']}",
+        "choices": _ordered(correct, wrongs, number),
+    }
+
+
+def _append_unique(questions: list[dict], candidate: dict, seen: set[str], number: int) -> None:
+    text = candidate["question_text"]
+    if text in seen:
+        candidate["question_text"] = f"{text} #{number}"
+    seen.add(candidate["question_text"])
+    questions.append(candidate)
+
+
+def expand_question_bank(course: dict) -> dict:
     expanded = deepcopy(course)
-    for module in expanded.get("modules", []):
+    modules = expanded.get("modules", [])
+
+    for module in modules:
         questions = module.setdefault("questions", [])
         seen = {q.get("question_text") for q in questions}
-        lessons = module.get("lessons", [])
-        terms = module.get("terms", [])
-        if not lessons or not terms:
-            continue
+        lessons = _lessons(module)
+        terms = _terms(module)
 
-        lesson_idx = 0
-        term_idx = 0
         number = 0
-        while len(questions) < target_per_module:
+        while len(questions) < BASELINE_QUESTIONS_PER_MODULE:
             if number % 2 == 0:
-                term = terms[term_idx % len(terms)]
-                lesson_slug = lessons[term_idx % len(lessons)]["slug"]
-                candidate = _term_question(module, lesson_slug, term, number)
-                term_idx += 1
+                term = terms[number % len(terms)]
+                lesson_slug = lessons[number % len(lessons)]["slug"]
+                candidate = _term_question(module, lesson_slug, term, number, "baseline")
             else:
-                lesson = lessons[lesson_idx % len(lessons)]
-                candidate = _lesson_question(module, lesson, number)
-                lesson_idx += 1
+                lesson = lessons[number % len(lessons)]
+                candidate = _lesson_question(module, lesson, number, "baseline")
+            _append_unique(questions, candidate, seen, number)
             number += 1
-            if candidate["question_text"] in seen:
-                candidate["question_text"] = f"{candidate['question_text']} #{number}"
-            seen.add(candidate["question_text"])
-            questions.append(candidate)
+
+        for i in range(SCENARIO_QUESTIONS_PER_MODULE):
+            lesson = lessons[i % len(lessons)]
+            term = terms[(i * 2) % len(terms)]
+            _append_unique(questions, _scenario_question(module, lesson, term, i), seen, i)
+
+        for i in range(HARD_QUESTIONS_PER_MODULE):
+            lesson = lessons[i % len(lessons)]
+            term = terms[(i * 3) % len(terms)]
+            _append_unique(questions, _hard_question(module, lesson, term, i), seen, i)
+
+    final_seen = set()
+    final_number = 0
+    while final_number < FINAL_EXAM_SIMULATION_QUESTIONS and modules:
+        module = modules[final_number % len(modules)]
+        lessons = _lessons(module)
+        terms = _terms(module)
+        lesson = lessons[final_number % len(lessons)]
+        term = terms[(final_number * 2) % len(terms)]
+        module_questions = module.setdefault("questions", [])
+        module_seen = {q.get("question_text") for q in module_questions} | final_seen
+        candidate = _final_exam_question(module, lesson, term, final_number)
+        _append_unique(module_questions, candidate, module_seen, final_number)
+        final_seen.add(candidate["question_text"])
+        final_number += 1
+
     return expanded
