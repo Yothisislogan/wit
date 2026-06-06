@@ -3,31 +3,45 @@ from fastapi.responses import HTMLResponse
 
 app = FastAPI(title="P&C License Prep Academy V1")
 
-MODULES = [
-    {"id": "basics", "title": "Insurance Basics", "lessons": [
-        {"id": "what-is-insurance", "title": "What Is Insurance?", "body": "Insurance transfers financial risk from the insured to the insurer. The insured pays premium and the insurer pays covered losses according to the policy."},
-        {"id": "risk-peril-hazard", "title": "Risk, Peril, and Hazard", "body": "Risk is the chance of loss. A peril is the cause of loss. A hazard is something that increases the chance or severity of loss."}
-    ]},
-    {"id": "contracts", "title": "Insurance Contracts", "lessons": [
-        {"id": "policy-parts", "title": "Policy Parts", "body": "Policies usually include declarations, insuring agreement, conditions, exclusions, and endorsements."}
-    ]},
-    {"id": "property", "title": "Property Fundamentals", "lessons": [
-        {"id": "acv-rc", "title": "ACV and Replacement Cost", "body": "Actual cash value is commonly replacement cost minus depreciation. Replacement cost pays to replace with like kind and quality, subject to policy terms."}
-    ]},
-    {"id": "casualty", "title": "Casualty Fundamentals", "lessons": [
-        {"id": "liability", "title": "Liability Basics", "body": "Liability coverage is third-party coverage for bodily injury or property damage claims made by others against the insured."}
-    ]}
-]
-
-QUESTIONS = [
-    {"id": "q1", "module_id": "basics", "question": "What is a peril?", "choices": ["The cause of loss", "The premium", "The insured", "The limit"], "answer": 0, "explanation": "A peril is the cause of loss."},
-    {"id": "q2", "module_id": "basics", "question": "Faulty wiring is best described as what?", "choices": ["A policy limit", "A hazard", "A deductible", "A declaration"], "answer": 1, "explanation": "Faulty wiring is a physical hazard."},
-    {"id": "q3", "module_id": "contracts", "question": "Which policy section summarizes the insured, limits, and policy dates?", "choices": ["Declarations", "Exclusions", "Subrogation", "Coinsurance"], "answer": 0, "explanation": "The declarations page is the policy snapshot."},
-    {"id": "q4", "module_id": "property", "question": "Actual cash value is commonly replacement cost minus what?", "choices": ["Premium", "Depreciation", "Policy number", "Insurable interest"], "answer": 1, "explanation": "ACV commonly subtracts depreciation."}
-]
-
 HTML = """
-<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>P&C License Prep V1</title><style>body{font-family:system-ui;margin:0;background:#f6fbff;color:#081521}.top{padding:18px 24px;background:#fff;border-bottom:1px solid #d8e8ef}.wrap{max-width:1100px;margin:24px auto;padding:0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}.card{background:#fff;border:1px solid #d8e8ef;border-radius:22px;padding:18px;box-shadow:0 10px 30px #0001}button{border:0;border-radius:999px;padding:10px 14px;background:#00AEEF;color:white;font-weight:800}.muted{color:#667085}</style></head><body><div class='top'><strong>P&C License Prep Academy</strong><div class='muted'>V1 restored starter</div></div><main class='wrap'><section class='card'><h1>Study smarter. Pass with confidence.</h1><p>General Property and Casualty licensing prep starter.</p><button onclick='loadModules()'>Load Modules</button> <button onclick='loadQuiz()'>Practice Quiz</button></section><div id='out' class='grid' style='margin-top:16px'></div></main><script>async function j(u,o){return fetch(u,o).then(r=>r.json())}async function loadModules(){let m=await j('/api/modules');out.innerHTML=m.map(x=>`<div class='card'><h2>${x.title}</h2><p>${x.lesson_count} lessons</p><button onclick="openModule('${x.id}')">Open</button></div>`).join('')}async function openModule(id){let m=await j('/api/modules/'+id);out.innerHTML=m.lessons.map(l=>`<div class='card'><h2>${l.title}</h2><p>${l.body}</p></div>`).join('')}async function loadQuiz(){let qs=await j('/api/questions');out.innerHTML=qs.map((q,i)=>`<div class='card'><h3>${q.question}</h3>${q.choices.map((c,n)=>`<p><button onclick='alert(${JSON.stringify(q.explanation)})'>${c}</button></p>`).join('')}</div>`).join('')}</script></body></html>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P&C License Prep Academy</title>
+<style>
+:root{--page:#eef1fb;--line:#dfe3eb;--paper:#fff;--ink:#202124;--muted:#6f7377;--blue:#00AEEF;--radius:22px}*{box-sizing:border-box}body{margin:0;height:100vh;overflow:hidden;background:var(--page);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink)}button{border:0;border-radius:999px;padding:.65rem .95rem;font:inherit;font-weight:750;cursor:pointer}.workspace{height:100vh;display:grid;grid-template-columns:minmax(300px,25vw) minmax(520px,1fr) minmax(320px,25vw);gap:12px;padding:0 16px 14px}.pane{background:var(--paper);border:1px solid var(--line);border-radius:0 0 var(--radius) var(--radius);display:flex;flex-direction:column;min-height:0;overflow:hidden}.pane-head{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid var(--line)}.pane-head h2{font-size:1.18rem;margin:0}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#f1f3f7}.pane-body{padding:18px;overflow:auto;flex:1}.add{width:100%;background:#fff;border:1px solid var(--line);font-size:1rem;margin-bottom:20px}.search{border:1px solid var(--line);border-radius:18px;background:#fbfcff;padding:14px;margin-bottom:20px}.search input{width:100%;border:0;outline:0;background:transparent;font-size:1rem}.chips{display:flex;gap:8px;margin-top:16px}.chips button{background:#fff;border:1px solid var(--line);color:#2d3135}.empty{height:55%;display:grid;place-items:center;text-align:center;color:var(--muted);padding:1rem}.empty .big,.spark{font-size:2rem;color:#777}.messages{flex:1;overflow:auto;padding:0 8px 0 0}.intro{font-size:1.05rem;line-height:1.5}.intro strong{font-weight:850}.note-actions{display:flex;gap:12px;align-items:center;margin:18px 0}.note-actions button{background:#fff;border:1px solid var(--line);color:#333}.suggestions{display:flex;flex-direction:column;gap:10px;align-items:flex-start;margin-top:18px}.suggestions button{background:#f7f7f8;color:#303236;border-radius:14px;font-weight:500}.composer{display:flex;align-items:center;gap:10px;border:1px solid #d6deeb;border-radius:18px;background:#fff;padding:12px 14px;margin-top:auto}.composer textarea{min-height:38px;max-height:110px;resize:none;flex:1;border:0;outline:0;padding:0;font-size:1rem}.meta{font-size:.84rem;color:var(--muted);white-space:nowrap}.send{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;font-size:1.4rem;padding:0;background:#e7e9ed;color:#4a4d51}.studio-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tile{min-height:70px;border-radius:14px;display:flex;align-items:center;justify-content:space-between;padding:14px;text-align:left;font-weight:850}.tile-a{background:#e9eefc;color:#163c8c}.tile-b{background:#f3f1df;color:#655610}.tile-c{background:#dff2e4;color:#0d6531}.tile-d{background:#f2e7f0;color:#873175}.tile-e{background:#f1f1e4;color:#6b5c17}.tile-f{background:#f7e9e9;color:#9d2828}.tile-g{background:#def3f9;color:#00739c}.tile-h{background:#f0e7f0;color:#7d317d}.tile-i{background:#e9eefc;color:#173d88}.studio-output{margin-top:18px;border-top:1px solid var(--line);padding-top:18px;min-height:220px;display:grid;place-items:center;text-align:center;color:#3b3e42}.primary{background:#000;color:white}@media(max-width:1100px){body{overflow:auto}.workspace{height:auto;min-height:100vh;grid-template-columns:1fr}.pane{border-radius:20px}}
+</style>
+</head>
+<body>
+<div class="workspace">
+  <aside class="pane">
+    <div class="pane-head"><h2>Sources</h2><div class="icon">▣</div></div>
+    <div class="pane-body">
+      <button class="add">＋ Add sources</button>
+      <div class="search"><input placeholder="Search the web for new sources"><div class="chips"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon">⌕</button></div></div>
+      <div class="empty"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div>
+    </div>
+  </aside>
+  <section class="pane">
+    <div class="pane-head"><h2>Chat</h2><div class="icon">⋮</div></div>
+    <div class="pane-body" style="display:flex;flex-direction:column;gap:16px">
+      <div class="messages"><div class="intro"><p>Welcome to <strong>P&C License Prep Academy</strong>.</p><p>This restored V1 service is only a visual fallback. The full working product is in <strong>pc-license-prep-server-v2</strong>.</p><p>For the real app, deploy V2 with Root Directory set to <strong>pc-license-prep-server-v2</strong>.</p><div class="note-actions"><button>⚑ Save to note</button><button class="icon">▥</button><button class="icon">👍</button><button class="icon">👎</button></div></div></div>
+      <div class="suggestions"><button>I have a mix of PDFs and text files</button><button>Can you explain how to add website links instead?</button><button>How many files can I upload to one notebook?</button></div>
+      <div class="composer"><textarea placeholder="Ask a question or create something"></textarea><span class="meta">0 sources</span><button class="send">➜</button></div>
+    </div>
+  </section>
+  <aside class="pane">
+    <div class="pane-head"><h2>Studio</h2><div class="icon">▣</div></div>
+    <div class="pane-body">
+      <div class="studio-grid"><button class="tile tile-a">Audio Overview <b>›</b></button><button class="tile tile-b">Slide Deck <b>›</b></button><button class="tile tile-c">Video Overview <b>›</b></button><button class="tile tile-d">Mind Map <b>›</b></button><button class="tile tile-e">Reports <b>›</b></button><button class="tile tile-f">Flashcards <b>›</b></button><button class="tile tile-g">Quiz <b>›</b></button><button class="tile tile-h">Infographic <b>›</b></button><button class="tile tile-i">Data Table <b>›</b></button></div>
+      <div class="studio-output"><div><div class="spark">✦</div><strong>Studio output will be saved here.</strong><p>After adding sources, click to add Audio Overview, Study Guide, Mind Map, and more!</p><button class="primary">Add note</button></div></div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>
 """
 
 @app.get("/", response_class=HTMLResponse)
@@ -36,35 +50,4 @@ def home():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "version": "v1-restored", "modules": len(MODULES), "questions": len(QUESTIONS)}
-
-@app.get("/api/modules")
-def modules():
-    return [{"id": m["id"], "title": m["title"], "lesson_count": len(m["lessons"])} for m in MODULES]
-
-@app.get("/api/modules/{module_id}")
-def module_detail(module_id: str):
-    for m in MODULES:
-        if m["id"] == module_id:
-            return m
-    return {"error": "not found"}
-
-@app.get("/api/questions")
-def questions(module_id: str | None = None):
-    return [{k: v for k, v in q.items() if k != "answer"} for q in QUESTIONS if module_id is None or q["module_id"] == module_id]
-
-@app.post("/api/questions/submit")
-def submit(payload: dict):
-    answers = payload.get("answers", {})
-    by_id = {q["id"]: q for q in QUESTIONS}
-    correct = 0
-    results = []
-    for qid, selected in answers.items():
-        q = by_id.get(qid)
-        if not q:
-            continue
-        ok = int(selected) == q["answer"]
-        correct += 1 if ok else 0
-        results.append({"id": qid, "correct": ok, "answer": q["answer"], "explanation": q["explanation"]})
-    total = max(len(results), 1)
-    return {"score": round(correct / total * 100), "results": results}
+    return {"ok": True, "version": "v1-visual-fallback", "note": "Deploy pc-license-prep-server-v2 for the full app."}
