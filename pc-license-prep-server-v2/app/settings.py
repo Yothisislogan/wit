@@ -11,6 +11,16 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.environ.get("APP_NAME", "P&C License Prep Academy")
@@ -28,6 +38,22 @@ class Settings:
 
     facebook_client_id: str = os.environ.get("FACEBOOK_CLIENT_ID", "")
     facebook_client_secret: str = os.environ.get("FACEBOOK_CLIENT_SECRET", "")
+
+    ai_key: str = os.environ.get("OPENAI_API_KEY", "")
+    ai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.5-mini")
+    ai_max_tokens: int = _int("OPENAI_MAX_OUTPUT_TOKENS", 700)
+
+    @property
+    def openai_api_key(self) -> str:
+        return self.ai_key
+
+    @property
+    def openai_model(self) -> str:
+        return self.ai_model
+
+    @property
+    def openai_max_output_tokens(self) -> int:
+        return self.ai_max_tokens
 
     @property
     def cors_origin_list(self) -> list[str]:
