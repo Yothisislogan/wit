@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -18,6 +18,7 @@ from .content_loader import seed_course_if_empty
 from .database import SessionLocal, create_all, get_db
 from .models import AnswerChoice, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term
 from .settings import settings
+from .tutor import ask_coverage_coach
 
 FRONTEND_DIR = __import__("pathlib").Path(__file__).resolve().parent.parent / "frontend"
 
@@ -34,6 +35,10 @@ class QuizSubmitIn(BaseModel):
     answers: dict[int, int] = Field(default_factory=dict, description="question_id -> selected_choice_id")
 
 
+class TutorAskIn(BaseModel):
+    message: str = Field(min_length=2, max_length=1200)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_all()
@@ -45,7 +50,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="P&C License Prep Academy API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="P&C License Prep Academy API", version="2.1.0", lifespan=lifespan)
 origins = settings.cors_origin_list
 app.add_middleware(
     CORSMiddleware,
@@ -122,12 +127,13 @@ def home():
 def health(db: Session = Depends(get_db)):
     return {
         "ok": True,
-        "version": "2.0.0",
+        "version": "2.1.0",
         "modules": db.scalar(select(func.count()).select_from(Module)),
         "lessons": db.scalar(select(func.count()).select_from(Lesson)),
         "questions": db.scalar(select(func.count()).select_from(Question)),
         "providers": configured_providers(),
         "free_public_access": True,
+        "coverage_coach_mode": "openai" if settings.openai_api_key else "fallback",
     }
 
 
@@ -308,3 +314,9 @@ def mistake_bank(request: Request, db: Session = Depends(get_db)):
         }
         for m in rows
     ]
+
+
+@app.post("/api/tutor/ask")
+def tutor_ask(payload: TutorAskIn, request: Request, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    return ask_coverage_coach(db, user, payload.message)
