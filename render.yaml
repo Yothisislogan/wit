@@ -1,11 +1,29 @@
 services:
   - type: web
-    name: pc-license-prep-academy
+    name: pc-license-prep-academy-v2
     env: python
     plan: starter
-    rootDir: pc-license-prep-server-v1
+    rootDir: pc-license-prep-server-v2
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: DB_PATH
-        value: /opt/render/project/src/pc_prep.db
+      - key: APP_BASE_URL
+        value: https://your-domain.com
+      - key: ENABLE_DEV_LOGIN
+        value: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pc-license-prep-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.5-mini
+      - key: OPENAI_MAX_OUTPUT_TOKENS
+        value: 700
+
+databases:
+  - name: pc-license-prep-db
+    plan: starter
