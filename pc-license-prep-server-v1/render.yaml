@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: pc-license-prep-academy-v1
-    env: python
-    plan: starter
-    rootDir: pc-license-prep-server-v1
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
