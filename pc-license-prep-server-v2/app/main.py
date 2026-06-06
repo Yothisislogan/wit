@@ -320,3 +320,122 @@ def mistake_bank(request: Request, db: Session = Depends(get_db)):
 def tutor_ask(payload: TutorAskIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
     return ask_coverage_coach(db, user, payload.message)
+
+
+@app.get("/api/dashboard")
+def dashboard(request: Request, db: Session = Depends(get_db)):
+    """Aggregated progress data for the dashboard view."""
+    user = require_user(request, db)
+
+    # ── Lesson completion ────────────────────────────────────────────
+    total_lessons = (
+        db.scalar(select(func.count()).select_from(Lesson).where(Lesson.is_active == True)) or 0
+    )
+    progress_rows = db.scalars(
+        select(LessonProgress).where(LessonProgress.user_id == user.id)
+    ).all()
+    completed_ids = {p.lesson_id for p in progress_rows if p.completed}
+
+    # ── Module breakdown + recommendations ──────────────────────────
+    modules = db.scalars(
+        select(Module)
+        .where(Module.is_active == True)
+        .options(selectinload(Module.lessons))
+        .order_by(Module.sort_order)
+    ).all()
+
+    module_stats: list[dict] = []
+    recommendations: list[dict] = []
+    for m in modules:
+        active = [l for l in m.lessons if l.is_active]
+        done = sum(1 for l in active if l.id in completed_ids)
+        pct = round(done / max(len(active), 1) * 100)
+        module_stats.append({
+            "slug": m.slug,
+            "title": m.title,
+            "total_lessons": len(active),
+            "completed_lessons": done,
+            "pct": pct,
+        })
+        # First incomplete lesson per module → up-next recommendations
+        if len(recommendations) < 4:
+            for l in sorted(active, key=lambda x: x.sort_order):
+                if l.id not in completed_ids:
+                    recommendations.append({
+                        "lesson_slug": l.slug,
+                        "lesson_title": l.title,
+                        "module_slug": m.slug,
+                        "module_title": m.title,
+                        "estimated_minutes": l.estimated_minutes or 7,
+                    })
+                    break
+
+    # ── Quiz history ─────────────────────────────────────────────────
+    recent_attempts = db.scalars(
+        select(QuizAttempt)
+        .where(QuizAttempt.user_id == user.id)
+        .order_by(QuizAttempt.created_at.desc())
+        .limit(10)
+    ).all()
+    avg_quiz = (
+        round(sum(a.score for a in recent_attempts) / len(recent_attempts))
+        if recent_attempts else 0
+    )
+
+    # ── Mistake bank ─────────────────────────────────────────────────
+    mistake_count = (
+        db.scalar(
+            select(func.count()).select_from(MistakeBank).where(MistakeBank.user_id == user.id)
+        ) or 0
+    )
+    top_mistakes = db.scalars(
+        select(MistakeBank)
+        .options(selectinload(MistakeBank.question))
+        .where(MistakeBank.user_id == user.id)
+        .order_by(MistakeBank.times_missed.desc())
+        .limit(5)
+    ).all()
+
+    # ── Readiness score ──────────────────────────────────────────────
+    # 40% lesson completion + 40% quiz average + 20% mistake factor
+    lesson_pct = round(len(completed_ids) / max(total_lessons, 1) * 100)
+    mistake_penalty = min(mistake_count * 2, 20)
+    readiness = min(100, round(lesson_pct * 0.4 + avg_quiz * 0.4 + max(0, 20 - mistake_penalty)))
+
+    return {
+        "user": user.display_name or user.email or "Candidate",
+        "readiness": readiness,
+        "lessons": {
+            "total": total_lessons,
+            "completed": len(completed_ids),
+            "pct": lesson_pct,
+        },
+        "quizzes": {
+            "total_taken": len(recent_attempts),
+            "avg_score": avg_quiz,
+            "recent": [
+                {
+                    "score": a.score,
+                    "total": a.total_questions,
+                    "date": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in recent_attempts[:8]
+            ],
+        },
+        "mistakes": {
+            "count": mistake_count,
+            "top": [
+                {
+                    "question": (
+                        m.question.question_text[:110] + "…"
+                        if m.question and len(m.question.question_text) > 110
+                        else (m.question.question_text if m.question else "")
+                    ),
+                    "times_missed": m.times_missed,
+                }
+                for m in top_mistakes
+            ],
+        },
+        "modules": module_stats,
+        "recommendations": recommendations,
+    }
