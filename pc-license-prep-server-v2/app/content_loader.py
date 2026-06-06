@@ -8,14 +8,21 @@ from .models import AnswerChoice, Lesson, Module, Question, Term
 
 
 def seed_course_if_empty(db: Session) -> None:
-    existing = db.scalar(select(Module.id).limit(1))
-    if existing:
-        return
+    """Load any missing seed modules.
+
+    Despite the historical function name, this now works as an idempotent seed sync:
+    it adds modules that do not already exist by slug. Existing modules are left
+    untouched so student progress and edited content are not overwritten.
+    """
     load_course(db, DEFAULT_COURSE)
 
 
 def load_course(db: Session, data: dict) -> None:
     for module_data in data.get("modules", []):
+        existing_module = db.scalar(select(Module).where(Module.slug == module_data["slug"]))
+        if existing_module:
+            continue
+
         module = Module(
             slug=module_data["slug"],
             title=module_data["title"],
