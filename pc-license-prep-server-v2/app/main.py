@@ -190,9 +190,15 @@ def get_module(slug: str, db: Session = Depends(get_db)):
 def get_lesson(slug: str, db: Session = Depends(get_db)):
     lesson = db.scalar(select(Lesson).where(Lesson.slug == slug, Lesson.is_active == True))
     if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-    terms = db.scalars(select(Term).where(Term.lesson_id == lesson.id).order_by(Term.term)).all()
-    return {**lesson_out(lesson), "terms": [term_out(t) for t in terms]}
+        raise HTTPException(404, "Lesson not found")
+    terms = db.scalars(select(Term).where(Term.module_id == lesson.module_id).order_by(Term.term)).all()
+    module = db.scalar(select(Module).where(Module.id == lesson.module_id))
+    return {
+        **lesson_out(lesson),
+        "module_slug": module.slug if module else "",
+        "module_title": module.title if module else "",
+        "terms": [term_out(t) for t in terms],
+    }
 
 
 def term_out(term: Term) -> dict[str, Any]:
