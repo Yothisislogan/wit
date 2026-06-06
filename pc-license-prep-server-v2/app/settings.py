@@ -52,5 +52,17 @@ class Settings:
     def tutor_mode(self) -> str:
         return "ollama"
 
+    @property
+    def openai_api_key(self) -> str:
+        return os.environ.get("OPENAI_API_KEY", "")
+
+    @property
+    def openai_model(self) -> str:
+        return os.environ.get("OPENAI_MODEL", self.ollama_model)
+
+    @property
+    def openai_max_output_tokens(self) -> int:
+        return self.ollama_max_tokens
+
 
 settings = Settings()
