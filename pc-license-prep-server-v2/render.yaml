@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: pc-license-prep-academy-v2
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_BASE_URL
+        value: https://your-domain.com
+      - key: ENABLE_DEV_LOGIN
+        value: false
+
+databases:
+  - name: pc-license-prep-db
+    plan: starter
