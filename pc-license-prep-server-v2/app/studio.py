@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -45,6 +46,13 @@ class StudioRequest(BaseModel):
 
 @router.get("/api/coach/health")
 def coach_health():
+    openai_ready = bool(settings.openai_api_key and os.environ.get("OPENAI_MODEL"))
+    if openai_ready:
+        return {
+            "coverage_coach_mode": "openai",
+            "openai": {"online": True, "model": os.environ.get("OPENAI_MODEL"), "detail": "configured"},
+            "ollama": ping_ollama(),
+        }
     status = ping_ollama()
     return {"coverage_coach_mode": "ollama" if status["online"] else "fallback", "ollama": status}
 
