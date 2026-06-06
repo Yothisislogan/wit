@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from .course_seed import DEFAULT_COURSE
 from .models import AnswerChoice, Lesson, Module, Question, Term
+from . import question_expander as qe
 
 
 # Seed loader for course content.
@@ -12,7 +13,7 @@ def seed_course_if_empty(db: Session) -> None:
     existing = db.scalar(select(Module.id).limit(1))
     if existing:
         return
-    load_course(db, DEFAULT_COURSE)
+    load_course(db, qe.expand_question_bank(DEFAULT_COURSE))
 
 
 def load_course(db: Session, data: dict) -> None:
