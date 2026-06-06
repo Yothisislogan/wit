@@ -22,7 +22,7 @@ The content should stay general until state-specific modules are intentionally a
 
 Modules are the top-level course sections.
 
-Recommended final module map:
+Current module map:
 
 1. Insurance Basics
 2. Insurance Contracts
@@ -88,11 +88,15 @@ Each question should have:
 - answer choices
 - explanation for each answer choice
 
-Recommended question types:
+Current question types:
 
 - multiple choice
-- true/false
 - scenario
+- final_exam
+
+Recommended future question types:
+
+- true/false
 - definition
 - coverage applies
 - exclusion recognition
@@ -104,16 +108,30 @@ Every wrong answer should explain why it is wrong.
 
 This matters because students often learn more from missed questions than from lessons.
 
-## Recommended content expansion target
+## Current question-bank volume
 
-For the free public launch:
+The V2 seed system now uses `app/question_expander.py` to generate a large study bank from the curated module, lesson, and glossary content.
 
-- 14 modules
-- 75 to 100 lessons
-- 500+ questions
-- 150+ glossary terms
-- 40+ scenarios
-- 3 final practice exams
+Current targets:
+
+```text
+Baseline review: 14 modules x 75 = 1,050 questions
+Scenario bank:   14 modules x 25 =   350 questions
+Hard bank:       14 modules x 10 =   140 questions
+Final simulation:                     100 questions
+Estimated total:                    1,640 questions
+```
+
+This gets the project above the 1,000 to 1,500 question-pool target. The next quality step is SME review and hand-polishing of the most important scenario and final-exam questions.
+
+## Quality tiers
+
+The bank is organized into four practical tiers:
+
+1. **Baseline review** — definition, memory, and concept questions.
+2. **Scenario bank** — fact-pattern questions that ask the candidate to apply a concept.
+3. **Hard bank** — questions with tricky wording like except, not, best, most likely, always, and only.
+4. **Final simulation** — mixed-topic exam-style questions across the full course.
 
 ## Difficulty levels
 
@@ -145,7 +163,7 @@ Recommended tags:
 
 ## Import/export direction
 
-The current V2 seed system loads default Python seed data. The next upgrade should support admin upload/export of JSON or CSV content.
+The current V2 seed system loads Python seed data and generated question banks. The next upgrade should support admin upload/export of JSON or CSV content.
 
 Recommended admin workflows:
 
