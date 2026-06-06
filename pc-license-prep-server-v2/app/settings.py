@@ -32,28 +32,14 @@ class Settings:
 
     google_client_id: str = os.environ.get("GOOGLE_CLIENT_ID", "")
     google_client_secret: str = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-
     microsoft_client_id: str = os.environ.get("MICROSOFT_CLIENT_ID", "")
     microsoft_client_secret: str = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
-
     facebook_client_id: str = os.environ.get("FACEBOOK_CLIENT_ID", "")
     facebook_client_secret: str = os.environ.get("FACEBOOK_CLIENT_SECRET", "")
 
-    ai_key: str = os.environ.get("OPENAI_API_KEY", "")
-    ai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.5-mini")
-    ai_max_tokens: int = _int("OPENAI_MAX_OUTPUT_TOKENS", 700)
-
-    @property
-    def openai_api_key(self) -> str:
-        return self.ai_key
-
-    @property
-    def openai_model(self) -> str:
-        return self.ai_model
-
-    @property
-    def openai_max_output_tokens(self) -> int:
-        return self.ai_max_tokens
+    ollama_base_url: str = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    ollama_model: str = os.environ.get("OLLAMA_MODEL", "deepseek-r1:7b")
+    ollama_max_tokens: int = _int("OLLAMA_MAX_TOKENS", 700)
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -61,6 +47,10 @@ class Settings:
 
     def oauth_configured(self, provider: str) -> bool:
         return bool(getattr(self, f"{provider}_client_id", "") and getattr(self, f"{provider}_client_secret", ""))
+
+    @property
+    def tutor_mode(self) -> str:
+        return "ollama"
 
 
 settings = Settings()
