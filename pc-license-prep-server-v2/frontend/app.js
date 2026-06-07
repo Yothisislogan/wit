@@ -218,34 +218,32 @@ let lastResults=null;
 async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:'practice',answers})});lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%')}
 async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
 async function showPlan(){
-  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Building your study plan…</p></div>';
-  let p;
-  try{p=await api('/api/study-plan');}
+  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your study plan…</p></div>';
+  // Load data-only summary first (fast), then fetch the full plan with Ollama narrative in background
+  let base;
+  try{base=await api('/api/study-plan/summary');}
   catch(e){
     app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Dashboard</button><h2>Study Plan</h2><p>Could not load plan.</p></div></div>`;
     return;
   }
-  const {summary,narrative,plan,weak_areas,strengths}=p;
-  const TYPE_ICONS={spaced_review:'🔁',weak_module:'⚡',confidence_gap:'🎯',start_here:'▶',finish_module:'✅'};
-  const planCards=plan.length
-    ?plan.map((step,i)=>`<div class="plan-step-card">
-        <div class="plan-step-num">${i+1}</div>
-        <div class="plan-step-body">
-          <div class="plan-step-icon">${TYPE_ICONS[step.type]||'📚'}</div>
-          <div class="plan-step-info">
-            <div class="plan-step-title">${esc(step.module_title)}</div>
-            <div class="plan-step-reason">${esc(step.reason)}</div>
+  const {summary,plan}=base;
+  function _renderPlanSteps(steps){
+    const TYPE_ICONS={spaced_review:'🔁',weak_module:'⚡',confidence_gap:'🎯',start_here:'▶',finish_module:'✅'};
+    return steps.length
+      ?steps.map((step,i)=>`<div class="plan-step-card">
+          <div class="plan-step-num">${i+1}</div>
+          <div class="plan-step-body">
+            <div class="plan-step-icon">${TYPE_ICONS[step.type]||'📚'}</div>
+            <div class="plan-step-info">
+              <div class="plan-step-title">${esc(step.module_title)}</div>
+              <div class="plan-step-reason">${esc(step.reason)}</div>
+            </div>
+            <button class="primary plan-step-btn" onclick="route('module','${esc(step.module_slug)}')">${esc(step.action_label)} →</button>
           </div>
-          <button class="primary plan-step-btn" onclick="route('module','${esc(step.module_slug)}')">${esc(step.action_label)} →</button>
-        </div>
-      </div>`).join('')
-    :'<p class="dash-empty">No plan items yet — complete some lessons and quizzes first.</p>';
-  const weakList=weak_areas.length
-    ?weak_areas.map(w=>`<li class="plan-area-item plan-weak"><span class="plan-area-name">${esc(w.title)}</span><span class="plan-area-pct">${w.accuracy}%</span></li>`).join('')
-    :'<li class="plan-area-item plan-muted">No weak areas yet</li>';
-  const strengthList=strengths.length
-    ?strengths.map(s=>`<li class="plan-area-item plan-strong"><span class="plan-area-name">${esc(s.title)}</span><span class="plan-area-pct">${s.accuracy}%</span></li>`).join('')
-    :'<li class="plan-area-item plan-muted">Keep studying to earn strengths!</li>';
+        </div>`).join('')
+      :'<p class="dash-empty">No plan items yet — complete some lessons and quizzes first.</p>';
+  }
+  // Render page immediately (no Ollama wait)
   app.innerHTML=`
   <div class="dash-page">
     <header class="dash-topbar-home">
@@ -260,23 +258,43 @@ async function showPlan(){
         <div class="plan-stat${summary.overall_readiness>=80?' stat-pass':summary.overall_readiness>=60?' stat-warn':''}"><div class="plan-stat-num">${summary.overall_readiness}%</div><div class="plan-stat-lbl">Quiz<br>Average</div></div>
         <div class="plan-stat${summary.review_items_due>0?' stat-warn':''}"><div class="plan-stat-num">${summary.review_items_due}</div><div class="plan-stat-lbl">Review<br>Due</div></div>
       </div>
-      <div class="plan-narrative card">${esc(narrative)}</div>
+      <div class="plan-narrative card" id="planNarrative"><span class="plan-narrative-spinner">Coverage Coach is writing your plan…</span></div>
       <section class="dash-section">
         <h2 class="dash-section-title">Priority Actions</h2>
-        <div class="plan-steps">${planCards}</div>
+        <div class="plan-steps" id="planSteps">${_renderPlanSteps(plan)}</div>
       </section>
       <div class="dash-bottom">
         <section class="dash-card dash-half">
           <h2 class="dash-section-title">Weak Areas</h2>
-          <ul class="plan-area-list">${weakList}</ul>
+          <ul class="plan-area-list" id="planWeak"><li class="plan-area-item plan-muted">Loading…</li></ul>
         </section>
         <section class="dash-card dash-half">
           <h2 class="dash-section-title">Strengths</h2>
-          <ul class="plan-area-list">${strengthList}</ul>
+          <ul class="plan-area-list" id="planStrong"><li class="plan-area-item plan-muted">Loading…</li></ul>
         </section>
       </div>
     </div>
   </div>`;
+  // Fetch full plan (with Ollama narrative) in background and inject when ready
+  api('/api/study-plan').then(full=>{
+    const narEl=document.getElementById('planNarrative');
+    if(narEl)narEl.textContent=full.narrative||'';
+    const stepsEl=document.getElementById('planSteps');
+    if(stepsEl)stepsEl.innerHTML=_renderPlanSteps(full.plan||[]);
+    const weakEl=document.getElementById('planWeak');
+    if(weakEl)weakEl.innerHTML=full.weak_areas&&full.weak_areas.length
+      ?full.weak_areas.map(w=>`<li class="plan-area-item plan-weak"><span class="plan-area-name">${esc(w.title)}</span><span class="plan-area-pct">${w.accuracy}%</span></li>`).join('')
+      :'<li class="plan-area-item plan-muted">No weak areas yet</li>';
+    const strongEl=document.getElementById('planStrong');
+    if(strongEl)strongEl.innerHTML=full.strengths&&full.strengths.length
+      ?full.strengths.map(s=>`<li class="plan-area-item plan-strong"><span class="plan-area-name">${esc(s.title)}</span><span class="plan-area-pct">${s.accuracy}%</span></li>`).join('')
+      :'<li class="plan-area-item plan-muted">Keep studying to earn strengths!</li>';
+  }).catch(()=>{
+    const narEl=document.getElementById('planNarrative');
+    if(narEl)narEl.textContent='Coverage Coach is offline — narrative unavailable.';
+    const weakEl=document.getElementById('planWeak');if(weakEl)weakEl.innerHTML='<li class="plan-area-item plan-muted">—</li>';
+    const strongEl=document.getElementById('planStrong');if(strongEl)strongEl.innerHTML='<li class="plan-area-item plan-muted">—</li>';
+  });
 }
 boot();
 async function showDashboard(){
@@ -287,7 +305,7 @@ async function showDashboard(){
     app.innerHTML='<div class="page-wrap"><div class="card"><h2>Dashboard</h2><p>Could not load progress data.</p><button class="primary" onclick="workspace()">Open Workspace →</button></div></div>';
     return;
   }
-  try{planData=await api('/api/study-plan');}catch(e){planData=null;}
+  try{planData=await api('/api/study-plan/summary');}catch(e){planData=null;}
   const {readiness,lessons,quizzes,mistakes,modules:mods,recommendations:recs,user:uname}=d;
   const ringColor=readiness>=80?'#10b981':readiness>=60?'#f59e0b':'#ef4444';
   const ringLabel=readiness>=80?'✓ Exam Ready':readiness>=60?'↑ Getting There':'⚡ Keep Studying';

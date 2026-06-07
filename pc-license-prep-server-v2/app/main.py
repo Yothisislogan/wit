@@ -446,163 +446,24 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/study-plan/summary")
+def study_plan_summary(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Lightweight plan summary — no Ollama, returns top-2 plan steps in <100ms."""
+    user = require_user(request, db)
+    data = _compute_study_plan(user, db)
+    return {"summary": data["summary"], "plan": data["plan"][:2]}
+
+
 @app.get("/api/study-plan")
 def study_plan(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     user = require_user(request, db)
-
-    # ── Per-module quiz accuracy ─────────────────────────────────────
-    all_modules = db.scalars(select(Module).where(Module.is_active == True).order_by(Module.sort_order)).all()  # noqa: E712
-
-    module_accuracy: dict[int, dict[str, Any]] = {}
-    for mod in all_modules:
-        total_ans = db.scalar(
-            select(func.count()).select_from(QuizAnswer)
-            .join(Question, QuizAnswer.question_id == Question.id)
-            .join(QuizAttempt, QuizAnswer.attempt_id == QuizAttempt.id)
-            .where(QuizAttempt.user_id == user.id, Question.module_id == mod.id)
-        ) or 0
-        correct_ans = db.scalar(
-            select(func.count()).select_from(QuizAnswer)
-            .join(Question, QuizAnswer.question_id == Question.id)
-            .join(QuizAttempt, QuizAnswer.attempt_id == QuizAttempt.id)
-            .where(QuizAttempt.user_id == user.id, Question.module_id == mod.id, QuizAnswer.is_correct == True)  # noqa: E712
-        ) or 0
-        accuracy = round(correct_ans / total_ans * 100) if total_ans else None
-
-        # Lesson completion + avg confidence for this module
-        lessons = db.scalars(
-            select(Lesson).where(Lesson.module_id == mod.id, Lesson.is_active == True)  # noqa: E712
-        ).all()
-        lesson_ids = [l.id for l in lessons]
-        progress_rows = db.scalars(
-            select(LessonProgress).where(
-                LessonProgress.user_id == user.id,
-                LessonProgress.lesson_id.in_(lesson_ids),
-            )
-        ).all() if lesson_ids else []
-        completed = [p for p in progress_rows if p.completed]
-        confidences = [p.confidence for p in progress_rows if p.confidence]
-        avg_conf = round(sum(confidences) / len(confidences), 1) if confidences else None
-        lesson_pct = round(len(completed) / len(lesson_ids) * 100) if lesson_ids else 0
-
-        module_accuracy[mod.id] = {
-            "id": mod.id,
-            "slug": mod.slug,
-            "title": mod.title,
-            "accuracy": accuracy,
-            "total_answers": total_ans,
-            "lesson_pct": lesson_pct,
-            "avg_confidence": avg_conf,
-            "total_lessons": len(lesson_ids),
-            "completed_lessons": len(completed),
-        }
-
-    # ── Spaced-repetition: overdue mistake bank items ─────────────────
-    due_mistakes = db.scalars(
-        select(MistakeBank)
-        .options(selectinload(MistakeBank.question))
-        .where(MistakeBank.user_id == user.id, MistakeBank.mastered_at == None)  # noqa: E711
-        .order_by(MistakeBank.last_missed_at.asc())
-        .limit(8)
-    ).all()
-
-    # ── Build prioritised plan ────────────────────────────────────────
-    stats = list(module_accuracy.values())
-
-    # Weakest modules: tested + low accuracy or low confidence vs high accuracy
-    tested = [s for s in stats if s["accuracy"] is not None]
-    untested = [s for s in stats if s["accuracy"] is None and s["lesson_pct"] < 100]
-
-    weak_areas: list[dict[str, Any]] = []
-    strengths: list[dict[str, Any]] = []
-    for s in tested:
-        if s["accuracy"] < 65:
-            weak_areas.append(s)
-        elif s["accuracy"] >= 80 and s["lesson_pct"] == 100:
-            strengths.append(s)
-
-    # Confidence gap: high confidence (avg_confidence >= 2.5) but low quiz accuracy (<70)
-    conf_gap = [
-        s for s in tested
-        if s["avg_confidence"] is not None and s["avg_confidence"] >= 2.5 and s["accuracy"] < 70
-    ]
-
-    plan: list[dict[str, Any]] = []
-
-    # 1. Spaced-repetition overdue items first
-    reviewed_module_ids = set()
-    for mb in due_mistakes[:3]:
-        if mb.question and mb.question.module_id not in reviewed_module_ids:
-            mod_stat = module_accuracy.get(mb.question.module_id)
-            if mod_stat:
-                plan.append({
-                    "type": "spaced_review",
-                    "module_slug": mod_stat["slug"],
-                    "module_title": mod_stat["title"],
-                    "reason": f"You've missed questions here {mb.times_missed}x — spaced repetition review is due.",
-                    "action_label": "Review Mistakes",
-                })
-                reviewed_module_ids.add(mb.question.module_id)
-
-    # 2. Weakest tested modules
-    for s in sorted(weak_areas, key=lambda x: x["accuracy"])[:3]:
-        if not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "weak_module",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": f"Quiz accuracy is {s['accuracy']}% — needs focused practice.",
-                "action_label": "Study & Quiz",
-            })
-
-    # 3. Confidence-gap modules
-    for s in conf_gap[:2]:
-        if not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "confidence_gap",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": f"You feel confident ({s['avg_confidence']}/3) but quiz accuracy is only {s['accuracy']}% — review to solidify.",
-                "action_label": "Solidify Knowledge",
-            })
-
-    # 4. Untested / incomplete modules (start-here for fresh users)
-    for s in sorted(untested, key=lambda x: x["total_lessons"])[:3]:
-        if not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "start_here",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": "You haven't studied this module yet — start here to build your foundation.",
-                "action_label": "Start Module",
-            })
-
-    # 5. Nearly-mastered (lesson 80–99%)
-    for s in stats:
-        if 80 <= s["lesson_pct"] < 100 and not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "finish_module",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": f"You've completed {s['lesson_pct']}% of lessons — finish the module to lock in mastery.",
-                "action_label": "Finish Module",
-            })
-
-    # ── Summary stats ────────────────────────────────────────────────
-    mastered = [s for s in stats if s["lesson_pct"] == 100 and (s["accuracy"] or 0) >= 75]
-    review_due = len([mb for mb in due_mistakes])
-    overall_readiness = (
-        db.scalar(
-            select(func.avg(QuizAttempt.score)).where(QuizAttempt.user_id == user.id)
-        ) or 0
-    )
-
-    summary = {
-        "overall_readiness": round(overall_readiness),
-        "modules_mastered": len(mastered),
-        "modules_total": len(all_modules),
-        "review_items_due": review_due,
-    }
+    data = _compute_study_plan(user, db)
+    summary = data["summary"]
+    plan = data["plan"]
+    weak_areas = data["weak_areas"]
+    strengths = data["strengths"]
+    tested = data["tested"]
+    review_due = summary["review_items_due"]
 
     # ── Ollama narrative ─────────────────────────────────────────────
     narrative_prompt = (
@@ -645,4 +506,152 @@ def study_plan(request: Request, db: Session = Depends(get_db)) -> dict[str, Any
         "plan": plan[:8],
         "weak_areas": [{"slug": s["slug"], "title": s["title"], "accuracy": s["accuracy"]} for s in weak_areas[:5]],
         "strengths": [{"slug": s["slug"], "title": s["title"], "accuracy": s["accuracy"]} for s in strengths[:5]],
+    }
+
+
+def _compute_study_plan(user: Any, db: Session) -> dict[str, Any]:
+    """Shared computation for both summary and full study-plan endpoints."""
+    all_modules = db.scalars(select(Module).where(Module.is_active == True).order_by(Module.sort_order)).all()  # noqa: E712
+
+    module_accuracy: dict[int, dict[str, Any]] = {}
+    for mod in all_modules:
+        total_ans = db.scalar(
+            select(func.count()).select_from(QuizAnswer)
+            .join(Question, QuizAnswer.question_id == Question.id)
+            .join(QuizAttempt, QuizAnswer.attempt_id == QuizAttempt.id)
+            .where(QuizAttempt.user_id == user.id, Question.module_id == mod.id)
+        ) or 0
+        correct_ans = db.scalar(
+            select(func.count()).select_from(QuizAnswer)
+            .join(Question, QuizAnswer.question_id == Question.id)
+            .join(QuizAttempt, QuizAnswer.attempt_id == QuizAttempt.id)
+            .where(QuizAttempt.user_id == user.id, Question.module_id == mod.id, QuizAnswer.is_correct == True)  # noqa: E712
+        ) or 0
+        accuracy = round(correct_ans / total_ans * 100) if total_ans else None
+
+        lessons = db.scalars(
+            select(Lesson).where(Lesson.module_id == mod.id, Lesson.is_active == True)  # noqa: E712
+        ).all()
+        lesson_ids = [l.id for l in lessons]
+        progress_rows = db.scalars(
+            select(LessonProgress).where(
+                LessonProgress.user_id == user.id,
+                LessonProgress.lesson_id.in_(lesson_ids),
+            )
+        ).all() if lesson_ids else []
+        completed = [p for p in progress_rows if p.completed]
+        confidences = [p.confidence for p in progress_rows if p.confidence]
+        avg_conf = round(sum(confidences) / len(confidences), 1) if confidences else None
+        lesson_pct = round(len(completed) / len(lesson_ids) * 100) if lesson_ids else 0
+
+        module_accuracy[mod.id] = {
+            "id": mod.id,
+            "slug": mod.slug,
+            "title": mod.title,
+            "accuracy": accuracy,
+            "total_answers": total_ans,
+            "lesson_pct": lesson_pct,
+            "avg_confidence": avg_conf,
+            "total_lessons": len(lesson_ids),
+            "completed_lessons": len(completed),
+        }
+
+    due_mistakes = db.scalars(
+        select(MistakeBank)
+        .options(selectinload(MistakeBank.question))
+        .where(MistakeBank.user_id == user.id, MistakeBank.mastered_at == None)  # noqa: E711
+        .order_by(MistakeBank.last_missed_at.asc())
+        .limit(8)
+    ).all()
+
+    stats = list(module_accuracy.values())
+    tested = [s for s in stats if s["accuracy"] is not None]
+    untested = [s for s in stats if s["accuracy"] is None and s["lesson_pct"] < 100]
+
+    weak_areas: list[dict[str, Any]] = []
+    strengths: list[dict[str, Any]] = []
+    for s in tested:
+        if s["accuracy"] < 65:
+            weak_areas.append(s)
+        elif s["accuracy"] >= 80 and s["lesson_pct"] == 100:
+            strengths.append(s)
+
+    conf_gap = [
+        s for s in tested
+        if s["avg_confidence"] is not None and s["avg_confidence"] >= 2.5 and s["accuracy"] < 70
+    ]
+
+    plan: list[dict[str, Any]] = []
+
+    reviewed_module_ids: set[int] = set()
+    for mb in due_mistakes[:3]:
+        if mb.question and mb.question.module_id not in reviewed_module_ids:
+            mod_stat = module_accuracy.get(mb.question.module_id)
+            if mod_stat:
+                plan.append({
+                    "type": "spaced_review",
+                    "module_slug": mod_stat["slug"],
+                    "module_title": mod_stat["title"],
+                    "reason": f"You've missed questions here {mb.times_missed}x — spaced repetition review is due.",
+                    "action_label": "Review Mistakes",
+                })
+                reviewed_module_ids.add(mb.question.module_id)
+
+    for s in sorted(weak_areas, key=lambda x: x["accuracy"])[:3]:
+        if not any(p["module_slug"] == s["slug"] for p in plan):
+            plan.append({
+                "type": "weak_module",
+                "module_slug": s["slug"],
+                "module_title": s["title"],
+                "reason": f"Quiz accuracy is {s['accuracy']}% — needs focused practice.",
+                "action_label": "Study & Quiz",
+            })
+
+    for s in conf_gap[:2]:
+        if not any(p["module_slug"] == s["slug"] for p in plan):
+            plan.append({
+                "type": "confidence_gap",
+                "module_slug": s["slug"],
+                "module_title": s["title"],
+                "reason": f"You feel confident ({s['avg_confidence']}/3) but quiz accuracy is only {s['accuracy']}% — review to solidify.",
+                "action_label": "Solidify Knowledge",
+            })
+
+    for s in sorted(untested, key=lambda x: x["total_lessons"])[:3]:
+        if not any(p["module_slug"] == s["slug"] for p in plan):
+            plan.append({
+                "type": "start_here",
+                "module_slug": s["slug"],
+                "module_title": s["title"],
+                "reason": "You haven't studied this module yet — start here to build your foundation.",
+                "action_label": "Start Module",
+            })
+
+    for s in stats:
+        if 80 <= s["lesson_pct"] < 100 and not any(p["module_slug"] == s["slug"] for p in plan):
+            plan.append({
+                "type": "finish_module",
+                "module_slug": s["slug"],
+                "module_title": s["title"],
+                "reason": f"You've completed {s['lesson_pct']}% of lessons — finish the module to lock in mastery.",
+                "action_label": "Finish Module",
+            })
+
+    mastered = [s for s in stats if s["lesson_pct"] == 100 and (s["accuracy"] or 0) >= 75]
+    review_due = len(due_mistakes)
+    overall_readiness = round(
+        db.scalar(select(func.avg(QuizAttempt.score)).where(QuizAttempt.user_id == user.id)) or 0
+    )
+
+    return {
+        "summary": {
+            "overall_readiness": overall_readiness,
+            "modules_mastered": len(mastered),
+            "modules_total": len(all_modules),
+            "review_items_due": review_due,
+        },
+        "plan": plan[:8],
+        "weak_areas": weak_areas,
+        "strengths": strengths,
+        "tested": tested,
     }
