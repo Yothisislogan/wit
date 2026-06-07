@@ -139,9 +139,59 @@ function answerQ(qi,ci){
 }
 async function showModules(){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Course Sources</h1><p class="muted">These are your built-in P&C study sources.</p><div class="grid">${modules.map(m=>`<div class="card"><div class="eyebrow">${m.lesson_count} lessons</div><h2>${esc(m.title)}</h2><p class="muted">${esc(m.description)}</p><button onclick="route('module','${m.slug}')">Open</button></div>`).join('')}</div></div></div>`}
 async function showModule(slug){const m=await api('/api/modules/'+slug);app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description)}</p><div class="list">${m.lessons.map(l=>`<div class="row"><div><strong>${esc(l.title)}</strong><br><span class="muted">${esc(l.summary)}</span></div><button onclick="route('lesson','${l.slug}')">Study</button></div>`).join('')}</div><div class="toolbar"><button onclick="route('quiz','${m.slug}')">Quiz This Module</button><button onclick="quickAsk('Explain the ${esc(m.title)} module and quiz me on it.')">Ask Coverage Coach</button></div></div></div>`}
-async function showLesson(slug){const l=await api('/api/lessons/'+slug);app.innerHTML=`<div class="page-wrap"><article class="lesson card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(l.title)}</h1><p class="muted">${esc(l.summary)}</p><p>${esc(l.body)}</p>${l.example?`<h3>Example</h3><p>${esc(l.example)}</p>`:''}${l.memory_tip?`<h3>Memory tip</h3><p>${esc(l.memory_tip)}</p>`:''}<h3>Key terms</h3><p>${l.terms.map(t=>`<span class="term" title="${esc(t.plain_english_definition)}">${esc(t.term)}</span>`).join('')||'<span class="muted">No terms yet.</span>'}</p><label>Confidence</label><select id="confidence"><option value="1">Need review</option><option value="2">Getting it</option><option value="3">Strong</option></select><label>Notes</label><textarea id="notes" placeholder="Study notes..."></textarea><div class="toolbar"><button class="primary" onclick="saveProgress(${l.id})">Mark Complete</button><button onclick="speak('${esc((l.audio_script||l.body).replace(/`/g,''))}')">Listen</button><button onclick="quickAsk('Explain the lesson ${esc(l.title)} and give me one practice question.')">Ask Coverage Coach</button></div></article></div>`}
-async function saveProgress(id){await api('/api/lessons/'+id+'/progress',{method:'POST',body:JSON.stringify({completed:true,confidence:Number(document.getElementById('confidence').value),notes:document.getElementById('notes').value,saved_for_review:false})});toast('Progress saved')}
-function speak(text){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(text))}
+async function showLesson(slug){
+  const l=await api('/api/lessons/'+slug);
+  let prev=null,next=null,lessonNum=0,total=0;
+  try{
+    const mod=await api('/api/modules/'+l.module_slug);
+    const ls=mod.lessons||[];total=ls.length;
+    const idx=ls.findIndex(x=>x.slug===slug);
+    lessonNum=idx+1;
+    prev=idx>0?ls[idx-1]:null;
+    next=idx<ls.length-1?ls[idx+1]:null;
+  }catch(e){}
+  const termsHtml=(l.terms&&l.terms.length)
+    ?l.terms.map(t=>`<div class="term-card"><strong>${esc(t.term)}</strong><p>${esc(t.exam_definition||t.plain_english_definition)}</p>${t.example?`<small>${esc(t.example)}</small>`:''}</div>`).join('')
+    :'<p class="muted">No terms for this module yet.</p>';
+  const prevBtn=prev
+    ?`<button onclick="route('lesson','${esc(prev.slug)}')">← Previous</button>`
+    :`<button disabled>← Previous</button>`;
+  const nextBtn=next
+    ?`<button class="primary" onclick="completeAndAdvance(${l.id},'${esc(next.slug)}')">Mark Complete &amp; Next →</button>`
+    :`<button class="primary" onclick="completeAndDone(${l.id})">Mark Complete ✓</button>`;
+  app.innerHTML=`<div class="page-wrap"><article class="lesson card">
+    <div class="lesson-nav-top">
+      <button onclick="route('module','${esc(l.module_slug)}')">← ${esc(l.module_title||'Module')}</button>
+      <span class="lesson-progress">${lessonNum?('Lesson '+lessonNum+' of '+total):''}</span>
+    </div>
+    <h1>${esc(l.title)}</h1>
+    <p class="lesson-summary muted">${esc(l.summary)}</p>
+    <div class="lesson-body"><p>${esc(l.body).replace(/\n\n+/g,'</p><p>')}</p></div>
+    ${l.example?`<h3>Example</h3><p>${esc(l.example)}</p>`:''}
+    ${l.memory_tip?`<h3>Memory tip</h3><p>${esc(l.memory_tip)}</p>`:''}
+    <h3>Key terms</h3>
+    <div class="term-grid">${termsHtml}</div>
+    <details class="lesson-notes-details">
+      <summary>Add personal notes (optional)</summary>
+      <label>Confidence</label>
+      <select id="confidence"><option value="1">Need review</option><option value="2" selected>Getting it</option><option value="3">Strong</option></select>
+      <label>Notes</label>
+      <textarea id="notes" placeholder="Study notes..."></textarea>
+    </details>
+    <div class="lesson-nav-bottom">${prevBtn}${nextBtn}</div>
+    <div class="lesson-coach"><button onclick="quickAsk('Explain the lesson ${esc(l.title)} and give me one practice question.')">Ask Coverage Coach about this lesson</button></div>
+  </article></div>`;
+}
+async function _saveLessonProgress(id){
+  await api('/api/lessons/'+id+'/progress',{method:'POST',body:JSON.stringify({
+    completed:true,
+    confidence:Number((document.getElementById('confidence')||{}).value||2),
+    notes:(document.getElementById('notes')||{}).value||'',
+    saved_for_review:false
+  })});
+}
+async function completeAndAdvance(id,nextSlug){await _saveLessonProgress(id);route('lesson',nextSlug);}
+async function completeAndDone(id){await _saveLessonProgress(id);toast('Module complete!');showDashboard();}
 async function terms(){const rows=await api('/api/terms');app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Flashcards</h1><div class="list">${rows.map(t=>`<div class="card"><span class="pill">${esc(t.term)}</span><p><strong>Plain English:</strong> ${esc(t.plain_english_definition)}</p><p><strong>Exam:</strong> ${esc(t.exam_definition)}</p>${t.example?`<p class="muted"><strong>Example:</strong> ${esc(t.example)}</p>`:''}</div>`).join('')}</div></div></div>`}
 async function quiz(moduleSlug){answers={};currentQuestions=await api('/api/questions?limit=10'+(moduleSlug?'&module_slug='+encodeURIComponent(moduleSlug):''));renderQuiz()}
 function renderQuiz(results=null){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Quiz</h1>${currentQuestions.map((q,i)=>`<div class="card"><div class="eyebrow">Question ${i+1}</div><h3>${esc(q.question_text)}</h3><div class="choices">${q.choices.map(c=>{let cls='choice';const r=results&&results.find(x=>x.question.id===q.id);if(answers[q.id]===c.id)cls+=' selected';if(r&&c.is_correct)cls+=' correct';if(r&&answers[q.id]===c.id&&!r.is_correct)cls+=' wrong';return `<div class="${cls}" onclick="answers[${q.id}]=${c.id};renderQuiz(${results?'lastResults':'null'})">${esc(c.choice_text)}</div>`}).join('')}</div>${results?`<p>${esc((results.find(x=>x.question.id===q.id)||{}).question?.explanation||'')}</p>`:''}</div>`).join('')}<div class="toolbar"><button class="primary" onclick="submitQuiz()">Submit</button><button onclick="quiz()">New Quiz</button></div></div></div>`}
