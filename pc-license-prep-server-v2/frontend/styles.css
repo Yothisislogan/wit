@@ -108,3 +108,28 @@ button.ghost{background:#fff;border:1px solid var(--line);color:#2d3135}
 
 .dash-empty{color:var(--text-muted);font-size:.82rem;font-style:italic}
 .dash-empty-sm{color:var(--text-muted);font-size:.72rem;margin:0}
+
+/* ── Lesson view ──────────────────────────────────────────────── */
+.lesson-nav-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:.85rem}
+.lesson-progress{color:var(--text-muted);font-weight:600}
+.lesson-summary{font-size:1.05rem;margin:0 0 18px;line-height:1.5}
+.lesson-body{font-size:1rem;line-height:1.7;margin-bottom:20px}
+.lesson-body p{margin:0 0 12px}
+
+.term-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin:8px 0 20px}
+.term-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.term-card strong{display:block;color:var(--accent,#6366f1);font-size:.88rem;margin-bottom:4px}
+.term-card p{margin:0 0 4px;font-size:.82rem;line-height:1.5}
+.term-card small{font-size:.72rem;color:var(--text-muted);font-style:italic}
+
+.lesson-notes-details{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 14px;margin:16px 0}
+.lesson-notes-details summary{cursor:pointer;font-size:.85rem;font-weight:600;color:var(--text-muted)}
+.lesson-notes-details label{display:block;font-size:.78rem;font-weight:600;margin:10px 0 4px;color:var(--text-muted)}
+.lesson-notes-details select,.lesson-notes-details textarea{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-card);color:var(--text)}
+.lesson-notes-details textarea{min-height:80px;resize:vertical}
+
+.lesson-nav-bottom{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:24px;padding-top:18px;border-top:1px solid var(--border)}
+.lesson-nav-bottom button{font-size:.9rem;padding:10px 16px}
+.lesson-nav-bottom button:disabled{opacity:.4;cursor:not-allowed}
+.lesson-coach{margin-top:14px;text-align:center}
+.lesson-coach button{font-size:.8rem;color:var(--text-muted)}
