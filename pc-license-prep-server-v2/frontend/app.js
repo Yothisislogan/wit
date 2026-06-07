@@ -6,7 +6,7 @@ async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-T
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
 async function loginScreen(){const p=await api('/auth/providers');app.innerHTML=`<section class="login card"><div class="eyebrow">Free public access</div><h1>Sign in to save your progress</h1><p class="muted">Use Google, Microsoft, or Facebook. Local development can use the demo login.</p>${p.providers.map(x=>`<a class="provider" href="/auth/login/${x.id}"><button class="primary provider" ${x.configured?'':'disabled'}>Continue with ${esc(x.name)}${x.configured?'':' — not configured'}</button></a>`).join('')}${p.dev_login_enabled?'<a class="provider" href="/auth/dev-login"><button class="ghost provider">Development Login</button></a>':''}</section>`}
-async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
+async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace();if(name==='plan')return showPlan()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
 function sourcePanel(){return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
 function chatPanel(){const defaultIntro=`<div class="message assistant intro"><p>Once unzipped, you can upload the individual files—like <strong>PDFs, Google Docs, or even text files</strong>—using the <strong>Source Panel</strong> on the left. You can also add website links or YouTube URLs if those are part of your project!</p><p>By uploading these sources, I can help you summarize the contents, find specific details, or even generate a <strong>Study Guide</strong> or <strong>Practice Quiz</strong> to help you process everything quickly.</p><p>What kind of files do you have inside that ZIP folder? I'd be happy to help you figure out the best way to bring them in!</p><div class="note-actions"><button class="ghost">⚑ Save to note</button><button class="icon-btn">▥</button><button class="icon-btn">👍</button><button class="icon-btn">👎</button></div></div>`;return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('I have a mix of PDFs and text files')">I have a mix of PDFs and text files</button><button onclick="quickAsk('Can you explain how to add website links instead?')">Can you explain how to add website links instead?</button><button onclick="quickAsk('How many files can I upload to one notebook?')">How many files can I upload to one notebook?</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div></div></section>`}
 function studioPanel(){
@@ -217,15 +217,77 @@ function renderQuiz(results=null){app.innerHTML=`<div class="page-wrap"><div cla
 let lastResults=null;
 async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:'practice',answers})});lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%')}
 async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
+async function showPlan(){
+  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Building your study plan…</p></div>';
+  let p;
+  try{p=await api('/api/study-plan');}
+  catch(e){
+    app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Dashboard</button><h2>Study Plan</h2><p>Could not load plan.</p></div></div>`;
+    return;
+  }
+  const {summary,narrative,plan,weak_areas,strengths}=p;
+  const TYPE_ICONS={spaced_review:'🔁',weak_module:'⚡',confidence_gap:'🎯',start_here:'▶',finish_module:'✅'};
+  const planCards=plan.length
+    ?plan.map((step,i)=>`<div class="plan-step-card">
+        <div class="plan-step-num">${i+1}</div>
+        <div class="plan-step-body">
+          <div class="plan-step-icon">${TYPE_ICONS[step.type]||'📚'}</div>
+          <div class="plan-step-info">
+            <div class="plan-step-title">${esc(step.module_title)}</div>
+            <div class="plan-step-reason">${esc(step.reason)}</div>
+          </div>
+          <button class="primary plan-step-btn" onclick="route('module','${esc(step.module_slug)}')">${esc(step.action_label)} →</button>
+        </div>
+      </div>`).join('')
+    :'<p class="dash-empty">No plan items yet — complete some lessons and quizzes first.</p>';
+  const weakList=weak_areas.length
+    ?weak_areas.map(w=>`<li class="plan-area-item plan-weak"><span class="plan-area-name">${esc(w.title)}</span><span class="plan-area-pct">${w.accuracy}%</span></li>`).join('')
+    :'<li class="plan-area-item plan-muted">No weak areas yet</li>';
+  const strengthList=strengths.length
+    ?strengths.map(s=>`<li class="plan-area-item plan-strong"><span class="plan-area-name">${esc(s.title)}</span><span class="plan-area-pct">${s.accuracy}%</span></li>`).join('')
+    :'<li class="plan-area-item plan-muted">Keep studying to earn strengths!</li>';
+  app.innerHTML=`
+  <div class="dash-page">
+    <header class="dash-topbar-home">
+      <span class="dash-brand">◈ P&amp;C Prep Academy</span>
+      <button class="ghost" onclick="route('dashboard')">← Dashboard</button>
+    </header>
+    <div class="dash-wrap">
+      <h1 class="dash-welcome">Your Adaptive Study Plan</h1>
+      <div class="plan-summary-bar">
+        <div class="plan-stat"><div class="plan-stat-num">${summary.modules_mastered}</div><div class="plan-stat-lbl">Modules<br>Mastered</div></div>
+        <div class="plan-stat"><div class="plan-stat-num">${summary.modules_total}</div><div class="plan-stat-lbl">Total<br>Modules</div></div>
+        <div class="plan-stat${summary.overall_readiness>=80?' stat-pass':summary.overall_readiness>=60?' stat-warn':''}"><div class="plan-stat-num">${summary.overall_readiness}%</div><div class="plan-stat-lbl">Quiz<br>Average</div></div>
+        <div class="plan-stat${summary.review_items_due>0?' stat-warn':''}"><div class="plan-stat-num">${summary.review_items_due}</div><div class="plan-stat-lbl">Review<br>Due</div></div>
+      </div>
+      <div class="plan-narrative card">${esc(narrative)}</div>
+      <section class="dash-section">
+        <h2 class="dash-section-title">Priority Actions</h2>
+        <div class="plan-steps">${planCards}</div>
+      </section>
+      <div class="dash-bottom">
+        <section class="dash-card dash-half">
+          <h2 class="dash-section-title">Weak Areas</h2>
+          <ul class="plan-area-list">${weakList}</ul>
+        </section>
+        <section class="dash-card dash-half">
+          <h2 class="dash-section-title">Strengths</h2>
+          <ul class="plan-area-list">${strengthList}</ul>
+        </section>
+      </div>
+    </div>
+  </div>`;
+}
 boot();
 async function showDashboard(){
   app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your dashboard…</p></div>';
-  let d;
+  let d,planData;
   try{d=await api('/api/dashboard');}
   catch(e){
     app.innerHTML='<div class="page-wrap"><div class="card"><h2>Dashboard</h2><p>Could not load progress data.</p><button class="primary" onclick="workspace()">Open Workspace →</button></div></div>';
     return;
   }
+  try{planData=await api('/api/study-plan');}catch(e){planData=null;}
   const {readiness,lessons,quizzes,mistakes,modules:mods,recommendations:recs,user:uname}=d;
   const ringColor=readiness>=80?'#10b981':readiness>=60?'#f59e0b':'#ef4444';
   const ringLabel=readiness>=80?'✓ Exam Ready':readiness>=60?'↑ Getting There':'⚡ Keep Studying';
@@ -272,6 +334,10 @@ async function showDashboard(){
     </header>
     <div class="dash-wrap">
       <h1 class="dash-welcome">Welcome back${uname?', <strong>'+esc(uname)+'</strong>':''}!</h1>
+      ${planData&&planData.plan&&planData.plan.length?`<div class="plan-dash-card">
+        <div class="plan-dash-hdr"><span class="plan-dash-title">📋 Study Plan</span><button class="ghost plan-dash-link" onclick="route('plan')">View full plan →</button></div>
+        <div class="plan-dash-steps">${planData.plan.slice(0,2).map((s,i)=>`<div class="plan-dash-step"><span class="plan-dash-num">${i+1}</span><div class="plan-dash-info"><strong>${esc(s.module_title)}</strong><span class="plan-dash-reason">${esc(s.reason.slice(0,80))}${s.reason.length>80?'…':''}</span></div><button class="primary plan-dash-action" onclick="route('module','${esc(s.module_slug)}')">${esc(s.action_label)} →</button></div>`).join('')}</div>
+      </div>`:''}
       <div class="dash-hero">
         <div class="dash-hero-ring">${ring}<div class="dash-ring-label" style="color:${ringColor}">${ringLabel}</div></div>
         <div class="dash-hero-stats">

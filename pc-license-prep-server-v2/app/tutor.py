@@ -112,6 +112,14 @@ def format_context(ctx: TutorContext) -> str:
     return "\n".join(parts).strip()
 
 
+def call_ollama_raw(system: str, user_prompt: str) -> str | None:
+    """Public wrapper around _call_ollama; returns None if Ollama is unreachable."""
+    try:
+        return _call_ollama(system, user_prompt)
+    except Exception:
+        return None
+
+
 def _strip_think(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
 
