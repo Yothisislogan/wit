@@ -133,7 +133,7 @@ def health(db: Session = Depends(get_db)):
         "questions": db.scalar(select(func.count()).select_from(Question)),
         "providers": configured_providers(),
         "free_public_access": True,
-        "coverage_coach_mode": "openai" if settings.openai_api_key else "fallback",
+        "coverage_coach_mode": settings.tutor_mode,
     }
 
 

@@ -159,15 +159,17 @@ def _call_openai(system: str, user_prompt: str) -> str:
 
 
 def _call_best_model(system: str, user_prompt: str) -> tuple[str, str, str | None]:
+    # Prefer Ollama (local) first; fall back to OpenAI only if explicitly configured.
+    try:
+        return _call_ollama(system, user_prompt), "ollama", settings.ollama_model
+    except Exception:
+        pass
     if settings.openai_api_key and os.environ.get("OPENAI_MODEL"):
         try:
             return _call_openai(system, user_prompt), "openai", os.environ.get("OPENAI_MODEL")
-        except Exception:
-            pass
-    try:
-        return _call_ollama(system, user_prompt), "ollama", settings.ollama_model
-    except Exception as exc:
-        raise RuntimeError(str(exc)) from exc
+        except Exception as exc:
+            raise RuntimeError(str(exc)) from exc
+    raise RuntimeError("No AI backend reachable (Ollama down, OpenAI not configured)")
 
 
 def _static_topic_answer(message: str) -> str:
