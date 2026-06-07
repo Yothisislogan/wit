@@ -200,16 +200,16 @@ async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST
 async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
 boot();
 async function showDashboard(){
-  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your dashboard\u2026</p></div>';
+  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your dashboard…</p></div>';
   let d;
   try{d=await api('/api/dashboard');}
   catch(e){
-    app.innerHTML='<div class="page-wrap"><div class="card"><h2>Dashboard</h2><p>Could not load progress data.</p><button class="primary" onclick="workspace()">Open Workspace \u2192</button></div></div>';
+    app.innerHTML='<div class="page-wrap"><div class="card"><h2>Dashboard</h2><p>Could not load progress data.</p><button class="primary" onclick="workspace()">Open Workspace →</button></div></div>';
     return;
   }
   const {readiness,lessons,quizzes,mistakes,modules:mods,recommendations:recs,user:uname}=d;
   const ringColor=readiness>=80?'#10b981':readiness>=60?'#f59e0b':'#ef4444';
-  const ringLabel=readiness>=80?'\u2713 Exam Ready':readiness>=60?'\u2191 Getting There':'\u26a1 Keep Studying';
+  const ringLabel=readiness>=80?'✓ Exam Ready':readiness>=60?'↑ Getting There':'⚡ Keep Studying';
   const circ=(2*Math.PI*40);
   const dash=(circ*readiness/100).toFixed(1);
   const ring=`<svg class="dash-ring-svg" viewBox="0 0 100 100">
@@ -236,20 +236,20 @@ async function showDashboard(){
   }).join('');
   const mistakeItems=mistakes.top.length
     ?mistakes.top.map(m=>`<li class="dash-mistake-item"><span class="dash-miss-badge">${m.times_missed}\xd7</span><span class="dash-miss-q">${esc(m.question)}</span></li>`).join('')
-    :'<li class="dash-no-data">No mistakes yet \u2014 great start!</li>';
+    :'<li class="dash-no-data">No mistakes yet — great start!</li>';
   const recCards=(recs||[]).slice(0,4).map(r=>
     `<button class="dash-rec-card" onclick="route('lesson','${esc(r.lesson_slug)}')">
       <div class="dash-rec-mod">${esc(r.module_title)}</div>
       <div class="dash-rec-title">${esc(r.lesson_title)}</div>
-      <div class="dash-rec-eta">\u223c${r.estimated_minutes} min \u2192</div>
+      <div class="dash-rec-eta">∼${r.estimated_minutes} min →</div>
     </button>`
   ).join('');
 
   app.innerHTML=`
   <div class="dash-page">
     <header class="dash-topbar-home">
-      <span class="dash-brand">\u25c8 P&amp;C Prep Academy</span>
-      <button class="primary dash-ws-btn" onclick="workspace()">Workspace \u2192</button>
+      <span class="dash-brand">◈ P&amp;C Prep Academy</span>
+      <button class="primary dash-ws-btn" onclick="workspace()">Workspace →</button>
     </header>
     <div class="dash-wrap">
       <h1 class="dash-welcome">Welcome back${uname?', <strong>'+esc(uname)+'</strong>':''}!</h1>
@@ -260,7 +260,7 @@ async function showDashboard(){
           <div class="dash-stat-card"><div class="dash-stat-num">${lessons.total}</div><div class="dash-stat-lbl">Total<br>Lessons</div></div>
           <div class="dash-stat-card"><div class="dash-stat-num">${quizzes.total_taken}</div><div class="dash-stat-lbl">Quizzes<br>Taken</div></div>
           <div class="dash-stat-card${quizzes.avg_score>=80?' stat-pass':quizzes.avg_score>=60?' stat-warn':''}">
-            <div class="dash-stat-num">${quizzes.avg_score||'\u2014'}%</div><div class="dash-stat-lbl">Quiz<br>Average</div></div>
+            <div class="dash-stat-num">${quizzes.avg_score||'—'}%</div><div class="dash-stat-lbl">Quiz<br>Average</div></div>
         </div>
         ${quizzes.recent.length?`<div class="dash-quiz-chart"><div class="dash-chart-lbl">Recent Scores</div><div class="dash-bars">${bars}</div></div>`:''}
       </div>
@@ -272,7 +272,7 @@ async function showDashboard(){
         <section class="dash-card dash-half">
           <h2 class="dash-section-title">Mistake Bank <span class="dash-pill">${mistakes.count}</span></h2>
           <ul class="dash-mistake-list">${mistakeItems}</ul>
-          ${mistakes.count>5?'<button class="ghost" onclick="route(\'quiz\')">Practice all mistakes \u2192</button>':''}
+          ${mistakes.count>5?'<button class="ghost" onclick="route(\'quiz\')">Practice all mistakes →</button>':''}
         </section>
         ${recCards?`<section class="dash-card dash-half">
           <h2 class="dash-section-title">Up Next</h2>
