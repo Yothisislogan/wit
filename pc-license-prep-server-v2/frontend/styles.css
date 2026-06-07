@@ -125,9 +125,11 @@ button.ghost{background:#fff;border:1px solid var(--line);color:#2d3135}
 .lesson-notes-details{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 14px;margin:16px 0}
 .lesson-notes-details summary{cursor:pointer;font-size:.85rem;font-weight:600;color:var(--text-muted)}
 .lesson-notes-details label{display:block;font-size:.78rem;font-weight:600;margin:10px 0 4px;color:var(--text-muted)}
-.lesson-notes-details select,.lesson-notes-details textarea{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-card)}
+.lesson-notes-details select,.lesson-notes-details textarea{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;background:var(--bg-card);color:var(--text)}
 .lesson-notes-details textarea{min-height:80px;resize:vertical}
 
 .lesson-nav-bottom{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:24px;padding-top:18px;border-top:1px solid var(--border)}
 .lesson-nav-bottom button{font-size:.9rem;padding:10px 16px}
 .lesson-nav-bottom button:disabled{opacity:.4;cursor:not-allowed}
+.lesson-coach{margin-top:14px;text-align:center}
+.lesson-coach button{font-size:.8rem;color:var(--text-muted)}

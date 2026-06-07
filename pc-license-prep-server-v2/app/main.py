@@ -190,7 +190,7 @@ def get_module(slug: str, db: Session = Depends(get_db)):
 def get_lesson(slug: str, db: Session = Depends(get_db)):
     lesson = db.scalar(select(Lesson).where(Lesson.slug == slug, Lesson.is_active == True))
     if not lesson:
-        raise HTTPException(404, "Lesson not found")
+        raise HTTPException(status_code=404, detail="Lesson not found")
     terms = db.scalars(select(Term).where(Term.module_id == lesson.module_id).order_by(Term.term)).all()
     module = db.scalar(select(Module).where(Module.id == lesson.module_id))
     return {
@@ -403,11 +403,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     ).all()
 
     # ── Readiness score ──────────────────────────────────────────────
-    # 40% lesson completion + 40% quiz average + 20% mistake factor
     lesson_pct = round(len(completed_ids) / max(total_lessons, 1) * 100)
     mistake_penalty = min(mistake_count * 2, 20)
-    readiness = min(100, round(lesson_pct * 0.5 + avg_quiz * 0.5 - mistake_penalty))
-    readiness = max(0, readiness)
+    readiness = max(0, min(100, round(lesson_pct * 0.5 + avg_quiz * 0.5 - mistake_penalty)))
 
     return {
         "user": user.name or user.email or "Candidate",

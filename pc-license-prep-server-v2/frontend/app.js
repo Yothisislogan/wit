@@ -140,80 +140,58 @@ function answerQ(qi,ci){
 async function showModules(){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Course Sources</h1><p class="muted">These are your built-in P&C study sources.</p><div class="grid">${modules.map(m=>`<div class="card"><div class="eyebrow">${m.lesson_count} lessons</div><h2>${esc(m.title)}</h2><p class="muted">${esc(m.description)}</p><button onclick="route('module','${m.slug}')">Open</button></div>`).join('')}</div></div></div>`}
 async function showModule(slug){const m=await api('/api/modules/'+slug);app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description)}</p><div class="list">${m.lessons.map(l=>`<div class="row"><div><strong>${esc(l.title)}</strong><br><span class="muted">${esc(l.summary)}</span></div><button onclick="route('lesson','${l.slug}')">Study</button></div>`).join('')}</div><div class="toolbar"><button onclick="route('quiz','${m.slug}')">Quiz This Module</button><button onclick="quickAsk('Explain the ${esc(m.title)} module and quiz me on it.')">Ask Coverage Coach</button></div></div></div>`}
 async function showLesson(slug){
-  const l = await api('/api/lessons/'+slug);
-  let prev=null, next=null, lessonNum=0, totalInModule=0;
-  try {
-    const mod = await api('/api/modules/'+l.module_slug);
-    const lessons = mod.lessons || [];
-    totalInModule = lessons.length;
-    const idx = lessons.findIndex(x => x.slug === slug);
-    lessonNum = idx + 1;
-    prev = idx > 0 ? lessons[idx-1] : null;
-    next = idx < lessons.length-1 ? lessons[idx+1] : null;
-  } catch(e) {}
-
-  const termsHtml = (l.terms && l.terms.length)
-    ? l.terms.map(t => `<div class="term-card"><strong>${esc(t.term)}</strong><p>${esc(t.exam_definition || t.plain_english_definition)}</p>${t.example ? `<small class="muted">${esc(t.example)}</small>` : ''}</div>`).join('')
-    : '<p class="muted">No terms for this module yet.</p>';
-
-  const prevBtn = prev
-    ? `<button onclick="route('lesson','${esc(prev.slug)}')">← ${esc(prev.title)}</button>`
-    : `<button disabled>← Previous</button>`;
-  const nextBtn = next
-    ? `<button class="primary" onclick="completeAndAdvance(${l.id}, '${esc(next.slug)}')">Mark Complete & Next →</button>`
-    : `<button class="primary" onclick="completeAndDone(${l.id})">Mark Complete ✓</button>`;
-
-  app.innerHTML = `<div class="page-wrap"><article class="lesson card">
+  const l=await api('/api/lessons/'+slug);
+  let prev=null,next=null,lessonNum=0,total=0;
+  try{
+    const mod=await api('/api/modules/'+l.module_slug);
+    const ls=mod.lessons||[];total=ls.length;
+    const idx=ls.findIndex(x=>x.slug===slug);
+    lessonNum=idx+1;
+    prev=idx>0?ls[idx-1]:null;
+    next=idx<ls.length-1?ls[idx+1]:null;
+  }catch(e){}
+  const termsHtml=(l.terms&&l.terms.length)
+    ?l.terms.map(t=>`<div class="term-card"><strong>${esc(t.term)}</strong><p>${esc(t.exam_definition||t.plain_english_definition)}</p>${t.example?`<small>${esc(t.example)}</small>`:''}</div>`).join('')
+    :'<p class="muted">No terms for this module yet.</p>';
+  const prevBtn=prev
+    ?`<button onclick="route('lesson','${esc(prev.slug)}')">← Previous</button>`
+    :`<button disabled>← Previous</button>`;
+  const nextBtn=next
+    ?`<button class="primary" onclick="completeAndAdvance(${l.id},'${esc(next.slug)}')">Mark Complete &amp; Next →</button>`
+    :`<button class="primary" onclick="completeAndDone(${l.id})">Mark Complete ✓</button>`;
+  app.innerHTML=`<div class="page-wrap"><article class="lesson card">
     <div class="lesson-nav-top">
-      <button onclick="route('module','${esc(l.module_slug)}')">← ${esc(l.module_title || 'Module')}</button>
-      <span class="lesson-progress">Lesson ${lessonNum} of ${totalInModule}</span>
+      <button onclick="route('module','${esc(l.module_slug)}')">← ${esc(l.module_title||'Module')}</button>
+      <span class="lesson-progress">${lessonNum?('Lesson '+lessonNum+' of '+total):''}</span>
     </div>
     <h1>${esc(l.title)}</h1>
     <p class="lesson-summary muted">${esc(l.summary)}</p>
-    <div class="lesson-body"><p>${esc(l.body).replace(/\n\n/g,'</p><p>')}</p></div>
-    ${l.example ? `<h3>Example</h3><p>${esc(l.example)}</p>` : ''}
-    ${l.memory_tip ? `<h3>Memory tip</h3><p>${esc(l.memory_tip)}</p>` : ''}
+    <div class="lesson-body"><p>${esc(l.body).replace(/\n\n+/g,'</p><p>')}</p></div>
+    ${l.example?`<h3>Example</h3><p>${esc(l.example)}</p>`:''}
+    ${l.memory_tip?`<h3>Memory tip</h3><p>${esc(l.memory_tip)}</p>`:''}
     <h3>Key terms</h3>
     <div class="term-grid">${termsHtml}</div>
     <details class="lesson-notes-details">
-      <summary>Add personal notes</summary>
+      <summary>Add personal notes (optional)</summary>
       <label>Confidence</label>
       <select id="confidence"><option value="1">Need review</option><option value="2" selected>Getting it</option><option value="3">Strong</option></select>
-      <textarea id="notes" placeholder="Optional study notes..."></textarea>
+      <label>Notes</label>
+      <textarea id="notes" placeholder="Study notes..."></textarea>
     </details>
-    <div class="lesson-nav-bottom">
-      ${prevBtn}
-      ${nextBtn}
-    </div>
+    <div class="lesson-nav-bottom">${prevBtn}${nextBtn}</div>
+    <div class="lesson-coach"><button onclick="quickAsk('Explain the lesson ${esc(l.title)} and give me one practice question.')">Ask Coverage Coach about this lesson</button></div>
   </article></div>`;
 }
-
-async function completeAndAdvance(lessonId, nextSlug){
-  await api('/api/lessons/'+lessonId+'/progress', {
-    method: 'POST',
-    body: JSON.stringify({
-      completed: true,
-      confidence: Number((document.getElementById('confidence')||{}).value || 2),
-      notes: (document.getElementById('notes')||{}).value || '',
-      saved_for_review: false
-    })
-  });
-  route('lesson', nextSlug);
+async function _saveLessonProgress(id){
+  await api('/api/lessons/'+id+'/progress',{method:'POST',body:JSON.stringify({
+    completed:true,
+    confidence:Number((document.getElementById('confidence')||{}).value||2),
+    notes:(document.getElementById('notes')||{}).value||'',
+    saved_for_review:false
+  })});
 }
-
-async function completeAndDone(lessonId){
-  await api('/api/lessons/'+lessonId+'/progress', {
-    method: 'POST',
-    body: JSON.stringify({
-      completed: true,
-      confidence: Number((document.getElementById('confidence')||{}).value || 2),
-      notes: (document.getElementById('notes')||{}).value || '',
-      saved_for_review: false
-    })
-  });
-  toast('Module complete!');
-  showDashboard();
-}
+async function completeAndAdvance(id,nextSlug){await _saveLessonProgress(id);route('lesson',nextSlug);}
+async function completeAndDone(id){await _saveLessonProgress(id);toast('Module complete!');showDashboard();}
 async function terms(){const rows=await api('/api/terms');app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Flashcards</h1><div class="list">${rows.map(t=>`<div class="card"><span class="pill">${esc(t.term)}</span><p><strong>Plain English:</strong> ${esc(t.plain_english_definition)}</p><p><strong>Exam:</strong> ${esc(t.exam_definition)}</p>${t.example?`<p class="muted"><strong>Example:</strong> ${esc(t.example)}</p>`:''}</div>`).join('')}</div></div></div>`}
 async function quiz(moduleSlug){answers={};currentQuestions=await api('/api/questions?limit=10'+(moduleSlug?'&module_slug='+encodeURIComponent(moduleSlug):''));renderQuiz()}
 function renderQuiz(results=null){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Quiz</h1>${currentQuestions.map((q,i)=>`<div class="card"><div class="eyebrow">Question ${i+1}</div><h3>${esc(q.question_text)}</h3><div class="choices">${q.choices.map(c=>{let cls='choice';const r=results&&results.find(x=>x.question.id===q.id);if(answers[q.id]===c.id)cls+=' selected';if(r&&c.is_correct)cls+=' correct';if(r&&answers[q.id]===c.id&&!r.is_correct)cls+=' wrong';return `<div class="${cls}" onclick="answers[${q.id}]=${c.id};renderQuiz(${results?'lastResults':'null'})">${esc(c.choice_text)}</div>`}).join('')}</div>${results?`<p>${esc((results.find(x=>x.question.id===q.id)||{}).question?.explanation||'')}</p>`:''}</div>`).join('')}<div class="toolbar"><button class="primary" onclick="submitQuiz()">Submit</button><button onclick="quiz()">New Quiz</button></div></div></div>`}
@@ -222,16 +200,16 @@ async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST
 async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
 boot();
 async function showDashboard(){
-  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your dashboard\u2026</p></div>';
+  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your dashboard…</p></div>';
   let d;
   try{d=await api('/api/dashboard');}
   catch(e){
-    app.innerHTML='<div class="page-wrap"><div class="card"><h2>Dashboard</h2><p>Could not load progress data.</p><button class="primary" onclick="workspace()">Open Workspace \u2192</button></div></div>';
+    app.innerHTML='<div class="page-wrap"><div class="card"><h2>Dashboard</h2><p>Could not load progress data.</p><button class="primary" onclick="workspace()">Open Workspace →</button></div></div>';
     return;
   }
   const {readiness,lessons,quizzes,mistakes,modules:mods,recommendations:recs,user:uname}=d;
   const ringColor=readiness>=80?'#10b981':readiness>=60?'#f59e0b':'#ef4444';
-  const ringLabel=readiness>=80?'\u2713 Exam Ready':readiness>=60?'\u2191 Getting There':'\u26a1 Keep Studying';
+  const ringLabel=readiness>=80?'✓ Exam Ready':readiness>=60?'↑ Getting There':'⚡ Keep Studying';
   const circ=(2*Math.PI*40);
   const dash=(circ*readiness/100).toFixed(1);
   const ring=`<svg class="dash-ring-svg" viewBox="0 0 100 100">
@@ -258,20 +236,20 @@ async function showDashboard(){
   }).join('');
   const mistakeItems=mistakes.top.length
     ?mistakes.top.map(m=>`<li class="dash-mistake-item"><span class="dash-miss-badge">${m.times_missed}\xd7</span><span class="dash-miss-q">${esc(m.question)}</span></li>`).join('')
-    :'<li class="dash-no-data">No mistakes yet \u2014 great start!</li>';
+    :'<li class="dash-no-data">No mistakes yet — great start!</li>';
   const recCards=(recs||[]).slice(0,4).map(r=>
     `<button class="dash-rec-card" onclick="route('lesson','${esc(r.lesson_slug)}')">
       <div class="dash-rec-mod">${esc(r.module_title)}</div>
       <div class="dash-rec-title">${esc(r.lesson_title)}</div>
-      <div class="dash-rec-eta">\u223c${r.estimated_minutes} min \u2192</div>
+      <div class="dash-rec-eta">∼${r.estimated_minutes} min →</div>
     </button>`
   ).join('');
 
   app.innerHTML=`
   <div class="dash-page">
     <header class="dash-topbar-home">
-      <span class="dash-brand">\u25c8 P&amp;C Prep Academy</span>
-      <button class="primary dash-ws-btn" onclick="workspace()">Workspace \u2192</button>
+      <span class="dash-brand">◈ P&amp;C Prep Academy</span>
+      <button class="primary dash-ws-btn" onclick="workspace()">Workspace →</button>
     </header>
     <div class="dash-wrap">
       <h1 class="dash-welcome">Welcome back${uname?', <strong>'+esc(uname)+'</strong>':''}!</h1>
@@ -282,7 +260,7 @@ async function showDashboard(){
           <div class="dash-stat-card"><div class="dash-stat-num">${lessons.total}</div><div class="dash-stat-lbl">Total<br>Lessons</div></div>
           <div class="dash-stat-card"><div class="dash-stat-num">${quizzes.total_taken}</div><div class="dash-stat-lbl">Quizzes<br>Taken</div></div>
           <div class="dash-stat-card${quizzes.avg_score>=80?' stat-pass':quizzes.avg_score>=60?' stat-warn':''}">
-            <div class="dash-stat-num">${quizzes.avg_score||'\u2014'}%</div><div class="dash-stat-lbl">Quiz<br>Average</div></div>
+            <div class="dash-stat-num">${quizzes.avg_score||'—'}%</div><div class="dash-stat-lbl">Quiz<br>Average</div></div>
         </div>
         ${quizzes.recent.length?`<div class="dash-quiz-chart"><div class="dash-chart-lbl">Recent Scores</div><div class="dash-bars">${bars}</div></div>`:''}
       </div>
@@ -294,7 +272,7 @@ async function showDashboard(){
         <section class="dash-card dash-half">
           <h2 class="dash-section-title">Mistake Bank <span class="dash-pill">${mistakes.count}</span></h2>
           <ul class="dash-mistake-list">${mistakeItems}</ul>
-          ${mistakes.count>5?'<button class="ghost" onclick="route(\'quiz\')">Practice all mistakes \u2192</button>':''}
+          ${mistakes.count>5?'<button class="ghost" onclick="route(\'quiz\')">Practice all mistakes →</button>':''}
         </section>
         ${recCards?`<section class="dash-card dash-half">
           <h2 class="dash-section-title">Up Next</h2>
