@@ -174,3 +174,15 @@ class MistakeBank(Base):
     mastered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     question: Mapped[Question] = relationship()
+
+
+class DiagnosticResult(Base):
+    __tablename__ = "diagnostic_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    module_scores: Mapped[str] = mapped_column(Text, default="{}")
+
+    user: Mapped["User"] = relationship()

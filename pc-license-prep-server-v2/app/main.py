@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,7 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import configured_providers, dev_login, login_redirect, oauth_callback, public_user, require_user
 from .content_loader import seed_course_if_empty
 from .database import SessionLocal, create_all, get_db
-from .models import AnswerChoice, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term
+from .models import AnswerChoice, DiagnosticResult, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term
 from .settings import settings
 from .tutor import ask_coverage_coach, call_ollama_raw  # noqa: F401 used in study_plan
 
@@ -37,6 +38,10 @@ class QuizSubmitIn(BaseModel):
 
 class TutorAskIn(BaseModel):
     message: str = Field(min_length=2, max_length=1200)
+
+
+class DiagnosticSubmitIn(BaseModel):
+    answers: dict[int, int] = Field(default_factory=dict, description="question_id -> selected_choice_id")
 
 
 @asynccontextmanager
@@ -556,6 +561,16 @@ def _compute_study_plan(user: Any, db: Session) -> dict[str, Any]:
             "completed_lessons": len(completed),
         }
 
+    # Incorporate diagnostic results for untested modules
+    diag = db.scalar(select(DiagnosticResult).where(DiagnosticResult.user_id == user.id))
+    diag_scores: dict[str, int] = json.loads(diag.module_scores or "{}") if diag else {}
+    for mod in all_modules:
+        stat = module_accuracy[mod.id]
+        if stat["accuracy"] is None and mod.slug in diag_scores:
+            # Synthetic accuracy: 100% if correct in diagnostic, 30% if wrong (weak signal)
+            stat["accuracy"] = 100 if diag_scores[mod.slug] == 1 else 30
+            stat["_from_diagnostic"] = True
+
     due_mistakes = db.scalars(
         select(MistakeBank)
         .options(selectinload(MistakeBank.question))
@@ -654,4 +669,109 @@ def _compute_study_plan(user: Any, db: Session) -> dict[str, Any]:
         "weak_areas": weak_areas,
         "strengths": strengths,
         "tested": tested,
+    }
+
+
+# ── Diagnostic placement quiz ─────────────────────────────────────────────────
+
+DIAGNOSTIC_MODULES = [
+    "insurance-basics",
+    "property-fundamentals",
+    "casualty-fundamentals",
+    "personal-auto",
+    "homeowners",
+]
+
+
+def _format_question_with_module(q: Question) -> dict[str, Any]:
+    return {
+        "id": q.id,
+        "question_text": q.question_text,
+        "question_type": q.question_type,
+        "difficulty": q.difficulty,
+        "module_slug": q.module.slug if q.module else "",
+        "module_title": q.module.title if q.module else "",
+        "choices": [
+            {"id": c.id, "choice_text": c.choice_text, "sort_order": c.sort_order}
+            for c in sorted(q.choices, key=lambda c: c.sort_order)
+        ],
+    }
+
+
+@app.get("/api/diagnostic/questions")
+def diagnostic_questions(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for slug in DIAGNOSTIC_MODULES:
+        mod = db.scalar(select(Module).where(Module.slug == slug, Module.is_active == True))  # noqa: E712
+        if not mod:
+            continue
+        questions = db.scalars(
+            select(Question)
+            .options(selectinload(Question.choices), selectinload(Question.module))
+            .where(Question.module_id == mod.id, Question.is_active == True)  # noqa: E712
+        ).all()
+        if questions:
+            result.append(_format_question_with_module(random.choice(questions)))
+    return result
+
+
+@app.post("/api/diagnostic/submit")
+def diagnostic_submit(
+    body: DiagnosticSubmitIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    user = require_user(request, db)
+
+    # One diagnostic per user — idempotent upsert
+    existing = db.scalar(select(DiagnosticResult).where(DiagnosticResult.user_id == user.id))
+
+    module_scores: dict[str, int] = {}
+    score = 0
+    for q_id, choice_id in body.answers.items():
+        q = db.scalar(
+            select(Question)
+            .options(selectinload(Question.choices), selectinload(Question.module))
+            .where(Question.id == int(q_id))
+        )
+        if not q:
+            continue
+        correct_choice = next((c for c in q.choices if c.is_correct), None)
+        is_correct = correct_choice is not None and correct_choice.id == int(choice_id)
+        if q.module:
+            module_scores[q.module.slug] = 1 if is_correct else 0
+        if is_correct:
+            score += 1
+
+    if existing:
+        existing.score = score
+        existing.module_scores = json.dumps(module_scores)
+        from datetime import datetime, timezone
+        existing.completed_at = datetime.now(timezone.utc)
+    else:
+        db.add(DiagnosticResult(
+            user_id=user.id,
+            score=score,
+            module_scores=json.dumps(module_scores),
+        ))
+    db.commit()
+
+    return {
+        "score": score,
+        "total": len(DIAGNOSTIC_MODULES),
+        "module_scores": module_scores,
+        "already_had_diagnostic": existing is not None,
+    }
+
+
+@app.get("/api/diagnostic/status")
+def diagnostic_status(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user = require_user(request, db)
+    result = db.scalar(select(DiagnosticResult).where(DiagnosticResult.user_id == user.id))
+    if not result:
+        return {"completed": False, "score": None, "module_scores": None}
+    return {
+        "completed": True,
+        "score": result.score,
+        "module_scores": json.loads(result.module_scores or "{}"),
     }

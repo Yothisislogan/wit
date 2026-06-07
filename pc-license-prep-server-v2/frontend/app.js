@@ -6,7 +6,7 @@ async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-T
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
 async function loginScreen(){const p=await api('/auth/providers');app.innerHTML=`<section class="login card"><div class="eyebrow">Free public access</div><h1>Sign in to save your progress</h1><p class="muted">Use Google, Microsoft, or Facebook. Local development can use the demo login.</p>${p.providers.map(x=>`<a class="provider" href="/auth/login/${x.id}"><button class="primary provider" ${x.configured?'':'disabled'}>Continue with ${esc(x.name)}${x.configured?'':' — not configured'}</button></a>`).join('')}${p.dev_login_enabled?'<a class="provider" href="/auth/dev-login"><button class="ghost provider">Development Login</button></a>':''}</section>`}
-async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace();if(name==='plan')return showPlan()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
+async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace();if(name==='plan')return showPlan();if(name==='diagnostic')return showDiagnostic()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
 function sourcePanel(){return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
 function chatPanel(){const defaultIntro=`<div class="message assistant intro"><p>Once unzipped, you can upload the individual files—like <strong>PDFs, Google Docs, or even text files</strong>—using the <strong>Source Panel</strong> on the left. You can also add website links or YouTube URLs if those are part of your project!</p><p>By uploading these sources, I can help you summarize the contents, find specific details, or even generate a <strong>Study Guide</strong> or <strong>Practice Quiz</strong> to help you process everything quickly.</p><p>What kind of files do you have inside that ZIP folder? I'd be happy to help you figure out the best way to bring them in!</p><div class="note-actions"><button class="ghost">⚑ Save to note</button><button class="icon-btn">▥</button><button class="icon-btn">👍</button><button class="icon-btn">👎</button></div></div>`;return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('I have a mix of PDFs and text files')">I have a mix of PDFs and text files</button><button onclick="quickAsk('Can you explain how to add website links instead?')">Can you explain how to add website links instead?</button><button onclick="quickAsk('How many files can I upload to one notebook?')">How many files can I upload to one notebook?</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div></div></section>`}
 function studioPanel(){
@@ -129,9 +129,10 @@ function answerQ(qi,ci){
   const isCorrect=ci===q.correct;
   const chosen=document.getElementById(`qc-${qi}-${ci}`);
   const correct=document.getElementById(`qc-${qi}-${q.correct}`);
-  if(chosen)chosen.classList.add(isCorrect?'qchoice-correct':'qchoice-wrong');
-  if(!isCorrect&&correct)correct.classList.add('qchoice-correct');
-  [0,1,2,3].forEach(i=>{const b=document.getElementById(`qc-${qi}-${i}`);if(b)b.disabled=true;});
+  // Dim all choices first, then highlight chosen and correct
+  [0,1,2,3].forEach(i=>{const b=document.getElementById(`qc-${qi}-${i}`);if(b){b.disabled=true;b.classList.add('qchoice-dim');}});
+  if(chosen){chosen.classList.remove('qchoice-dim');chosen.classList.add(isCorrect?'qchoice-correct':'qchoice-wrong');chosen.textContent=(isCorrect?'✓ ':'✗ ')+chosen.textContent;}
+  if(!isCorrect&&correct){correct.classList.remove('qchoice-dim');correct.classList.add('qchoice-correct');correct.textContent='✓ '+correct.textContent;}
   const fb=document.getElementById(`qfeedback-${qi}`);
   if(fb)fb.innerHTML=`<div class="qfeedback-box ${isCorrect?'qfb-correct':'qfb-wrong'}">${isCorrect?'✓ Correct':'✗ Incorrect'} — ${esc(q.explanation||'')}</div>`;
   const answered=studioQuizState.filter(s=>s!==null).length;
@@ -217,6 +218,54 @@ function renderQuiz(results=null){app.innerHTML=`<div class="page-wrap"><div cla
 let lastResults=null;
 async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:'practice',answers})});lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%')}
 async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
+async function showDiagnostic(){
+  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading placement quiz…</p></div>';
+  let qs;
+  try{qs=await api('/api/diagnostic/questions');}
+  catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Dashboard</button><h2>Placement Quiz</h2><p>Could not load questions.</p></div></div>`;return;}
+  const diagAnswers={};
+  function _renderDiag(){
+    const allAnswered=qs.every(q=>diagAnswers[q.id]!=null);
+    const cards=qs.map((q,qi)=>{
+      const answered=diagAnswers[q.id]!=null;
+      const choices=q.choices.map(c=>{
+        let cls='diag-choice';
+        if(answered){
+          if(diagAnswers[q.id]===c.id)cls+=' diag-selected';
+          else cls+=' diag-dimmed';
+        }
+        return `<button class="${cls}" ${answered?'disabled':''} onclick="_diagAnswer(${qi},${c.id})">${esc(c.choice_text)}</button>`;
+      }).join('');
+      return `<div class="diag-card${answered?' diag-card-done':''}">
+        <div class="diag-q-meta"><span class="diag-q-mod">${esc(q.module_title)}</span><span class="diag-q-num">Q${qi+1} of ${qs.length}</span></div>
+        <p class="diag-q-text"><strong>${qi+1}.</strong> ${esc(q.question_text)}</p>
+        <div class="diag-choices">${choices}</div>
+      </div>`;
+    }).join('');
+    app.innerHTML=`<div class="page-wrap diagnostic-page">
+      <div class="card" style="max-width:780px;margin:0 auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+          <button onclick="route('dashboard')">← Dashboard</button>
+          <span style="font-size:.82rem;color:var(--text-muted);font-weight:600">Placement Quiz · ${qs.filter(q=>diagAnswers[q.id]!=null).length} / ${qs.length} answered</span>
+        </div>
+        <h2 style="margin:0 0 4px">Where do you stand?</h2>
+        <p class="muted" style="margin:0 0 20px;font-size:.88rem">Answer all 5 questions, then submit to personalize your study plan.</p>
+        <div id="diagCards">${cards}</div>
+        ${allAnswered?'<div style="text-align:center;margin-top:24px"><button class="primary" style="font-size:1rem;padding:12px 28px" onclick="_diagSubmit()">Submit &amp; See My Plan →</button></div>':''}
+      </div>
+    </div>`;
+  }
+  window._diagAnswer=function(qi,choiceId){diagAnswers[qs[qi].id]=choiceId;_renderDiag();};
+  window._diagSubmit=async function(){
+    app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Submitting…</p></div>';
+    try{
+      const result=await api('/api/diagnostic/submit',{method:'POST',body:JSON.stringify({answers:diagAnswers})});
+      sessionStorage.setItem('diagnosticScore',JSON.stringify(result));
+    }catch(e){toast('Could not submit — please try again.');}
+    route('plan');
+  };
+  _renderDiag();
+}
 async function showPlan(){
   app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your study plan…</p></div>';
   // Load data-only summary first (fast), then fetch the full plan with Ollama narrative in background
@@ -252,6 +301,7 @@ async function showPlan(){
     </header>
     <div class="dash-wrap">
       <h1 class="dash-welcome">Your Adaptive Study Plan</h1>
+      ${(()=>{const raw=sessionStorage.getItem('diagnosticScore');if(!raw)return '';sessionStorage.removeItem('diagnosticScore');try{const r=JSON.parse(raw);const ms=r.module_scores||{};const strong=Object.entries(ms).filter(([,v])=>v===1).map(([k])=>k.replace(/-/g,' ')).join(', ');const focus=Object.entries(ms).filter(([,v])=>v===0).map(([k])=>k.replace(/-/g,' ')).join(', ');return `<div class="diagnostic-results-banner"><span class="diag-banner-score">✅ Placement complete: You scored ${r.score}/${r.total}</span>${strong?`<span class="diag-banner-strong">💪 Strong foundation: ${esc(strong)}</span>`:''}${focus?`<span class="diag-banner-focus">🎯 Focus areas: ${esc(focus)}</span>`:''}<span class="diag-banner-tail">Your plan has been personalized based on your results.</span></div>`;}catch(e){return '';}})()}
       <div class="plan-summary-bar">
         <div class="plan-stat"><div class="plan-stat-num">${summary.modules_mastered}</div><div class="plan-stat-lbl">Modules<br>Mastered</div></div>
         <div class="plan-stat"><div class="plan-stat-num">${summary.modules_total}</div><div class="plan-stat-lbl">Total<br>Modules</div></div>
@@ -306,6 +356,9 @@ async function showDashboard(){
     return;
   }
   try{planData=await api('/api/study-plan/summary');}catch(e){planData=null;}
+  let diagStatus=null;
+  try{diagStatus=await api('/api/diagnostic/status');}catch(e){}
+  const showDiagPrompt=diagStatus&&!diagStatus.completed&&sessionStorage.getItem('diagnosticSkipped')!=='true';
   const {readiness,lessons,quizzes,mistakes,modules:mods,recommendations:recs,user:uname}=d;
   const ringColor=readiness>=80?'#10b981':readiness>=60?'#f59e0b':'#ef4444';
   const ringLabel=readiness>=80?'✓ Exam Ready':readiness>=60?'↑ Getting There':'⚡ Keep Studying';
@@ -352,6 +405,19 @@ async function showDashboard(){
     </header>
     <div class="dash-wrap">
       <h1 class="dash-welcome">Welcome back${uname?', <strong>'+esc(uname)+'</strong>':''}!</h1>
+      ${showDiagPrompt?`<div class="diagnostic-prompt-card">
+        <div class="diag-prompt-body">
+          <div class="diag-prompt-icon">📋</div>
+          <div class="diag-prompt-text">
+            <strong>Quick Placement Quiz</strong>
+            <span class="diag-prompt-sub">Find out where to focus — 5 questions, 2 minutes.</span>
+          </div>
+        </div>
+        <div class="diag-prompt-actions">
+          <button class="primary" onclick="route('diagnostic')">Start Placement Quiz →</button>
+          <button class="ghost" onclick="sessionStorage.setItem('diagnosticSkipped','true');this.closest('.diagnostic-prompt-card').remove()">Skip for now</button>
+        </div>
+      </div>`:''}
       ${planData&&planData.plan&&planData.plan.length?`<div class="plan-dash-card">
         <div class="plan-dash-hdr"><span class="plan-dash-title">📋 Study Plan</span><button class="ghost plan-dash-link" onclick="route('plan')">View full plan →</button></div>
         <div class="plan-dash-steps">${planData.plan.slice(0,2).map((s,i)=>`<div class="plan-dash-step"><span class="plan-dash-num">${i+1}</span><div class="plan-dash-info"><strong>${esc(s.module_title)}</strong><span class="plan-dash-reason">${esc(s.reason.slice(0,80))}${s.reason.length>80?'…':''}</span></div><button class="primary plan-dash-action" onclick="route('module','${esc(s.module_slug)}')">${esc(s.action_label)} →</button></div>`).join('')}</div>
