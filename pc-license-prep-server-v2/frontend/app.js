@@ -1,6 +1,6 @@
 const app=document.getElementById('app');
 const toastEl=document.getElementById('toast');
-let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];
+let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];let studioModuleSlug='';
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
@@ -52,7 +52,7 @@ function studio(action){
   }
   const TITLES={study_guide:'Generating Study Guide…',practice_quiz:'Generating Practice Quiz…',cram_sheet:'Loading Cram Sheet…',concept_map:'Generating Concept Map…'};
   out.innerHTML=`<div class="studio-loading"><div class="studio-spinner"></div><p>${TITLES[action]||'Working…'}</p><small>Coverage Coach is thinking — may take 30–60s.</small></div>`;
-  api('/api/studio/generate','POST',{action,module_slug:studioModuleSlug})
+  api('/api/studio/generate',{method:'POST',body:JSON.stringify({action,module_slug:studioModuleSlug})})
     .then(data=>{
       if(action==='study_guide')        renderStudyGuide(out,data);
       else if(action==='practice_quiz') renderPracticeQuiz(out,data);
@@ -189,7 +189,7 @@ async function showLesson(slug){
     </details>
     <div class="lesson-nav-bottom">${prevBtn}${nextBtn}</div>
     <div class="lesson-coach">
-      <button onclick="speakLesson(${JSON.stringify(l.body||'')})">🔊 Listen</button>
+      <button onclick="speakLesson(${JSON.stringify(l.body||'').replace(/"/g,'&quot;')})">🔊 Listen</button>
       <button onclick="quickAsk('Explain the lesson ${esc(l.title)} and give me one practice question.')">Ask Coverage Coach about this lesson</button>
     </div>
   </article></div>`;
