@@ -91,6 +91,56 @@ hdr "Phase 7 — File ownership"
 chown -R "${RUN_AS}:${RUN_AS}" "${APP_DIR}"
 ok "Ownership set to ${RUN_AS}"
 
+# ── Phase 7b — Voice pipeline service ────────────────────────────
+hdr "Phase 7b — Voice pipeline service"
+
+# System deps for TTS (espeak-ng) and audio conversion (ffmpeg)
+apt-get install -y --no-install-recommends espeak-ng ffmpeg
+ok "espeak-ng and ffmpeg installed"
+
+# Dedicated virtualenv using Python 3.12 for voice deps
+VOICE_VENV="${APP_DIR}/.venv-voice"
+python3.12 -m venv "${VOICE_VENV}"
+"${VOICE_VENV}/bin/pip" install --upgrade pip --quiet
+"${VOICE_VENV}/bin/pip" install -r "${APP_DIR}/voice_service/requirements.txt" --quiet
+ok "Voice virtualenv created and requirements installed"
+
+cat > "/etc/systemd/system/${APP_NAME}-voice.service" <<VOICESVCEOF
+[Unit]
+Description=P&C License Prep — Voice Pipeline (port 8001)
+After=network.target ${APP_NAME}.service
+
+[Service]
+Type=simple
+User=${RUN_AS}
+WorkingDirectory=${APP_DIR}
+EnvironmentFile=${ENV_FILE}
+ExecStart=${VOICE_VENV}/bin/uvicorn voice_service.main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+VOICESVCEOF
+
+systemctl daemon-reload
+systemctl enable "${APP_NAME}-voice"
+systemctl restart "${APP_NAME}-voice"
+ok "Voice service ${APP_NAME}-voice started"
+
+# Health check — wait up to 20s for models to load
+echo "Waiting for voice service health check…"
+for i in $(seq 1 10); do
+    sleep 2
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/health || true)
+    if [ "${STATUS}" = "200" ]; then
+        ok "Voice service healthy (http://localhost:8001/health)"
+        break
+    fi
+    echo "  attempt ${i}/10 — got HTTP ${STATUS}"
+done
+[ "${STATUS}" = "200" ] || echo "WARNING: voice service did not respond in time — check: journalctl -u ${APP_NAME}-voice"
+
 # ── Phase 8 — Systemd service ─────────────────────────────────────
 hdr "Phase 8 — Systemd service"
 cat > "/etc/systemd/system/${APP_NAME}.service" <<SVCEOF

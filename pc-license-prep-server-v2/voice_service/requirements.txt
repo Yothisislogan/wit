@@ -1,0 +1,8 @@
+kokoro>=0.9.0
+faster-whisper>=1.0.0
+soundfile
+numpy
+fastapi
+uvicorn
+python-multipart
+httpx
