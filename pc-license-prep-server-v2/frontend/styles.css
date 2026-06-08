@@ -263,10 +263,10 @@ button.ghost{background:#fff;border:1px solid var(--line);color:#2d3135}
 .flashcard-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;font-size:.85rem}
 .flashcard-count{font-weight:700;color:var(--accent,#6366f1)}
 .flashcard-scene{perspective:1000px;width:100%;height:280px;cursor:pointer;margin-bottom:24px}
-.flashcard-inner{position:relative;width:100%;height:100%;transition:transform 0.5s;transform-style:preserve-3d}
-.flashcard-inner.flipped{transform:rotateY(180deg)}
-.flashcard-front,.flashcard-back{position:absolute;width:100%;height:100%;backface-visibility:hidden;border-radius:16px;border:1px solid var(--border);background:var(--bg-card);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;box-sizing:border-box}
-.flashcard-back{transform:rotateY(180deg);justify-content:flex-start;overflow-y:auto}
+.flashcard-inner{position:relative;width:100%;height:100%;transition:transform 0.5s;transform-style:preserve-3d;-webkit-transform-style:preserve-3d}
+.flashcard-inner.flipped{transform:rotateY(180deg);-webkit-transform:rotateY(180deg)}
+.flashcard-front,.flashcard-back{position:absolute;top:0;left:0;width:100%;height:100%;backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:16px;border:1px solid var(--border);background:var(--bg-card);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;box-sizing:border-box}
+.flashcard-back{transform:rotateY(180deg);-webkit-transform:rotateY(180deg);justify-content:flex-start;overflow-y:auto}
 .flashcard-module-label{font-size:.65rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent,#6366f1);margin-bottom:12px}
 .flashcard-term{font-size:1.6rem;font-weight:700;text-align:center;margin-bottom:8px}
 .flashcard-hint{font-size:.8rem;color:var(--text-muted);margin-top:12px}
