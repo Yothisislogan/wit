@@ -493,12 +493,12 @@ async function showDashboard(){
   const circ=(2*Math.PI*40);
   const dash=(circ*readiness/100).toFixed(1);
   const ring=`<svg class="dash-ring-svg" viewBox="0 0 100 100">
-    <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)" stroke-width="10"/>
-    <circle cx="50" cy="50" r="40" fill="none" stroke="${ringColor}" stroke-width="10"
+    <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)" stroke-width="8"/>
+    <circle cx="50" cy="50" r="40" fill="none" stroke="${ringColor}" stroke-width="8"
       stroke-dasharray="${dash} ${circ.toFixed(1)}" stroke-linecap="round"
       transform="rotate(-90 50 50)" style="transition:stroke-dasharray .6s"/>
-    <text x="50" y="46" text-anchor="middle" font-size="20" font-weight="700" fill="${ringColor}">${readiness}%</text>
-    <text x="50" y="62" text-anchor="middle" font-size="7" fill="var(--text-muted)">Readiness</text>
+    <text x="50" y="47" text-anchor="middle" font-size="22" font-weight="700" fill="${ringColor}">${readiness}%</text>
+    <text x="50" y="61" text-anchor="middle" font-size="6" fill="var(--text-muted)" style="text-transform:uppercase;letter-spacing:2px">READINESS</text>
   </svg>`;
   const bars=quizzes.recent.length
     ?quizzes.recent.slice().reverse().map(q=>{
@@ -508,20 +508,20 @@ async function showDashboard(){
     :'<p class="dash-empty-sm">No quizzes yet</p>';
   const modCards=mods.map(m=>{
     const dc=m.pct===100?'#10b981':m.pct>0?'#6366f1':'var(--text-muted)';
-    return `<button class="dash-mod-card" onclick="route('module','${esc(m.slug)}')">
+    return `<button class="dash-mod-card${m.pct===100?' dash-mod-card-done':''}" onclick="route('module','${esc(m.slug)}')">
       <div class="dash-mod-hdr"><span class="dash-mod-name">${esc(m.title)}</span><span class="dash-mod-pct" style="color:${dc}">${m.pct}%</span></div>
       <div class="dash-progbar"><div class="dash-progfill${m.pct===100?' dash-progfull':''}" style="width:${Math.max(m.pct,2)}%"></div></div>
       <div class="dash-mod-meta">${m.completed_lessons} / ${m.total_lessons} lessons</div>
     </button>`;
   }).join('');
   const mistakeItems=mistakes.top.length
-    ?mistakes.top.map(m=>`<li class="dash-mistake-item"><span class="dash-miss-badge">${m.times_missed}\xd7</span><span class="dash-miss-q">${esc(m.question)}</span></li>`).join('')
+    ?mistakes.top.map(m=>{const q=m.question.length>80?m.question.slice(0,80)+'…':m.question;return `<li class="dash-mistake-item"><span class="dash-miss-badge">✗ ${m.times_missed}\xd7</span><span class="dash-miss-q">${esc(q)}</span></li>`;}).join('')
     :'<li class="dash-no-data">No mistakes yet — great start!</li>';
   const recCards=(recs||[]).slice(0,4).map(r=>
     `<button class="dash-rec-card" onclick="route('lesson','${esc(r.lesson_slug)}')">
       <div class="dash-rec-mod">${esc(r.module_title)}</div>
       <div class="dash-rec-title">${esc(r.lesson_title)}</div>
-      <div class="dash-rec-eta">∼${r.estimated_minutes} min →</div>
+      <div class="dash-rec-eta">∼${r.estimated_minutes} min &nbsp;<span style="color:var(--accent,#6366f1);font-weight:700">Start →</span></div>
     </button>`
   ).join('');
 
@@ -533,6 +533,7 @@ async function showDashboard(){
     </header>
     <div class="dash-wrap">
       <h1 class="dash-welcome">Welcome back${uname?', <strong>'+esc(uname)+'</strong>':''}!</h1>
+      <p class="dash-welcome-sub">Here's your study snapshot for today.</p>
       ${showDiagPrompt?`<div class="diagnostic-prompt-card">
         <div class="diag-prompt-body">
           <div class="diag-prompt-icon">📋</div>
@@ -547,7 +548,7 @@ async function showDashboard(){
         </div>
       </div>`:''}
       ${planData&&planData.plan&&planData.plan.length?`<div class="plan-dash-card">
-        <div class="plan-dash-hdr"><span class="plan-dash-title">📋 Study Plan</span><button class="ghost plan-dash-link" onclick="route('plan')">View full plan →</button></div>
+        <div class="plan-dash-hdr"><span class="plan-dash-title" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);font-weight:700">📋 Study Plan</span><button class="ghost plan-dash-link" onclick="route('plan')">View full plan →</button></div>
         <div class="plan-dash-steps">${planData.plan.slice(0,2).map((s,i)=>`<div class="plan-dash-step"><span class="plan-dash-num">${i+1}</span><div class="plan-dash-info"><strong>${esc(s.module_title)}</strong><span class="plan-dash-reason">${esc(s.reason.slice(0,80))}${s.reason.length>80?'…':''}</span></div><button class="primary plan-dash-action" onclick="route('module','${esc(s.module_slug)}')">${esc(s.action_label)} →</button></div>`).join('')}</div>
       </div>`:''}
       <div class="dash-hero">
@@ -562,17 +563,17 @@ async function showDashboard(){
         ${quizzes.recent.length?`<div class="dash-quiz-chart"><div class="dash-chart-lbl">Recent Scores</div><div class="dash-bars">${bars}</div></div>`:''}
       </div>
       <section class="dash-section">
-        <h2 class="dash-section-title">Module Progress</h2>
+        <h2 class="dash-section-title">📊 Module Progress</h2>
         <div class="dash-mod-grid">${modCards||'<p class="dash-empty">No modules loaded yet.</p>'}</div>
       </section>
       <div class="dash-bottom">
         <section class="dash-card dash-half">
-          <h2 class="dash-section-title">Mistake Bank <span class="dash-pill">${mistakes.count}</span></h2>
+          <h2 class="dash-section-title">📝 Mistake Bank <span class="dash-pill">${mistakes.count}</span></h2>
           <ul class="dash-mistake-list">${mistakeItems}</ul>
           ${mistakes.count>5?'<button class="ghost" onclick="route(\'quiz\')">Practice all mistakes →</button>':''}
         </section>
         ${recCards?`<section class="dash-card dash-half">
-          <h2 class="dash-section-title">Up Next</h2>
+          <h2 class="dash-section-title">🎯 Up Next</h2>
           <div class="dash-recs">${recCards}</div>
         </section>`:''}
       </div>
