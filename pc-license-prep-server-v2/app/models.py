@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -186,3 +186,33 @@ class DiagnosticResult(Base):
     module_scores: Mapped[str] = mapped_column(Text, default="{}")
 
     user: Mapped["User"] = relationship()
+
+
+class FlashcardProgress(Base):
+    __tablename__ = "flashcard_progress"
+    __table_args__ = (UniqueConstraint("user_id", "term_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    term_id: Mapped[int] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
+    ease: Mapped[float] = mapped_column(Float, default=2.5)
+    interval_days: Mapped[float] = mapped_column(Float, default=1.0)
+    review_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_review: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_reviewed: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    term: Mapped["Term"] = relationship()
+
+
+class ExamSession(Base):
+    __tablename__ = "exam_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="in_progress")
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_questions: Mapped[int] = mapped_column(Integer, default=50)
+    answers_json: Mapped[str] = mapped_column(Text, default="{}")
+    results_json: Mapped[str] = mapped_column(Text, default="{}")

@@ -40,8 +40,8 @@ function studioPanel(){
     <button class="studio-tile tile-quiz"  onclick="studio('practice_quiz')"><span>✎<br>Practice Quiz</span><b>›</b></button>
     <button class="studio-tile tile-cram"  onclick="studio('cram_sheet')"><span>⚡<br>Cram Sheet</span><b>›</b></button>
     <button class="studio-tile tile-map"   onclick="studio('concept_map')"><span>⌘<br>Concept Map</span><b>›</b></button>
-    <button class="studio-tile tile-flash" onclick="route('terms')"><span>▧<br>Flashcards</span><b>›</b></button>
-    <button class="studio-tile tile-exam"  onclick="route('quiz',studioModuleSlug||undefined)"><span>▢<br>Exam Sim</span><b>›</b></button>
+    <button class="studio-tile tile-flash" onclick="showFlashcards(studioModuleSlug||'')"><span>▧<br>Flashcards</span><b>›</b></button>
+    <button class="studio-tile tile-exam"  onclick="showExamSim()"><span>▢<br>Exam Sim</span><b>›</b></button>
   </div>
   <div class="studio-output" id="studioOutput">
     <div class="studio-empty"><div class="spark">✦</div>
@@ -365,6 +365,204 @@ async function showPlan(){
     const strongEl=document.getElementById('planStrong');if(strongEl)strongEl.innerHTML='<li class="plan-area-item plan-muted">—</li>';
   });
 }
+// ── Flashcards ─────────────────────────────────────────────────────────────
+async function showFlashcards(moduleSlug){
+  app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading flashcards…</p></div>';
+  let cards;
+  try{cards=await api('/api/flashcards'+(moduleSlug?'?module_slug='+encodeURIComponent(moduleSlug):''));}
+  catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="workspace()">← Workspace</button><p>Could not load flashcards.</p></div></div>`;return;}
+  if(!cards.length){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="workspace()">← Workspace</button><h2>No flashcards found</h2><p class="muted">Add terms to modules to generate flashcards.</p></div></div>`;return;}
+
+  const dueCount=cards.filter(c=>c.due).length;
+  let idx=0;let flipped=false;
+  const stats={again:0,hard:0,good:0,easy:0};
+  let reviewed=0;
+
+  function _renderCard(){
+    const c=cards[idx];
+    const moduleLabel=c.module_title||'';
+    const front=`<div class="flashcard-front"><div class="flashcard-module-label">${esc(moduleLabel)}</div><div class="flashcard-term">${esc(c.term)}</div><div class="flashcard-hint">Tap to reveal definition</div></div>`;
+    const back=`<div class="flashcard-back"><div class="flashcard-module-label">${esc(moduleLabel)}</div><div class="flashcard-term" style="font-size:1.1rem;margin-bottom:8px">${esc(c.term)}</div><div class="flashcard-divider"></div><div class="flashcard-definition">${esc(c.definition)}</div>${c.example?`<div class="flashcard-example">Example: ${esc(c.example)}</div>`:''}</div>`;
+    const ratingBtns=flipped?`<div class="rating-buttons"><button class="rating-btn rating-btn-again" onclick="_fcRate(1)">😰 Again</button><button class="rating-btn rating-btn-hard" onclick="_fcRate(2)">😓 Hard</button><button class="rating-btn rating-btn-good" onclick="_fcRate(3)">🙂 Good</button><button class="rating-btn rating-btn-easy" onclick="_fcRate(4)">😄 Easy</button></div>`:'';
+    const dueLabel=cards.filter((x,i)=>i>=idx&&x.due).length;
+    app.innerHTML=`<div class="page-wrap flashcard-page">
+      <div class="flashcard-header">
+        <button onclick="workspace()">← Workspace</button>
+        <span>Flashcards${moduleLabel?' · '+esc(moduleLabel):''}</span>
+        <span class="flashcard-count">${dueLabel} due</span>
+      </div>
+      <div class="flashcard-scene" onclick="_fcFlip()">
+        <div class="flashcard-inner${flipped?' flipped':''}" id="fcInner">${front}${back}</div>
+      </div>
+      ${ratingBtns}
+      <div class="flashcard-skip">
+        <button class="ghost" onclick="_fcSkip()">← Skip</button>
+        <button class="ghost" onclick="_fcFlip()">${flipped?'⟳ Flip back':'Flip →'}</button>
+      </div>
+      <div style="text-align:center;margin-top:8px;font-size:.75rem;color:var(--text-muted)">${idx+1} / ${cards.length}</div>
+    </div>`;
+  }
+
+  window._fcFlip=function(){flipped=!flipped;_renderCard();};
+  window._fcSkip=function(){if(idx<cards.length-1){idx++;flipped=false;_renderCard();}else{_fcComplete();}};
+  window._fcRate=async function(rating){
+    const c=cards[idx];
+    const ratingName=['','again','hard','good','easy'][rating];
+    stats[ratingName]=(stats[ratingName]||0)+1;
+    reviewed++;
+    try{await api('/api/flashcards/'+c.id+'/review',{method:'POST',body:JSON.stringify({rating})});}catch(e){}
+    if(idx<cards.length-1){idx++;flipped=false;_renderCard();}else{_fcComplete();}
+  };
+
+  function _fcComplete(){
+    const total=reviewed;
+    const pctGood=total?Math.round((stats.good+stats.easy)/total*100):0;
+    app.innerHTML=`<div class="page-wrap flashcard-page">
+      <div class="flashcard-complete">
+        <div style="font-size:2.5rem;margin-bottom:12px">🎉</div>
+        <h2>Session Complete!</h2>
+        <p class="muted">You reviewed ${total} card${total!==1?'s':''}.</p>
+        <div class="fc-stats">
+          <div class="fc-stat"><div class="fc-stat-num" style="color:#dc2626">${stats.again||0}</div><div class="fc-stat-label">Again</div></div>
+          <div class="fc-stat"><div class="fc-stat-num" style="color:#f59e0b">${stats.hard||0}</div><div class="fc-stat-label">Hard</div></div>
+          <div class="fc-stat"><div class="fc-stat-num" style="color:#6366f1">${stats.good||0}</div><div class="fc-stat-label">Good</div></div>
+          <div class="fc-stat"><div class="fc-stat-num" style="color:#16a34a">${stats.easy||0}</div><div class="fc-stat-label">Easy</div></div>
+        </div>
+        <p style="font-size:.88rem;color:var(--text-muted)">${pctGood}% rated Good or Easy</p>
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:20px">
+          <button class="primary" onclick="showFlashcards('${esc(moduleSlug)}')">Study More</button>
+          <button class="ghost" onclick="workspace()">← Back to Workspace</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  _renderCard();
+}
+
+// ── Exam Sim ───────────────────────────────────────────────────────────────
+async function showExamSim(){
+  app.innerHTML=`<div class="page-wrap exam-page">
+    <div class="exam-score-banner" style="background:var(--bg-card);border:1px solid var(--border)">
+      <div style="font-size:2rem;margin-bottom:12px">📋</div>
+      <h2 style="margin:0 0 12px">P&amp;C License Exam Simulation</h2>
+      <ul style="text-align:left;display:inline-block;margin:0 0 20px;line-height:2">
+        <li>50 questions across all 14 modules</li>
+        <li>90 minute time limit</li>
+        <li>70% required to pass</li>
+        <li>You cannot pause once started</li>
+      </ul>
+      <p style="font-size:.85rem;color:var(--text-muted);margin:0 0 24px">Your results will be saved and feed your study plan.</p>
+      <div style="display:flex;gap:12px;justify-content:center">
+        <button class="ghost" onclick="workspace()">← Back</button>
+        <button class="primary" style="font-size:1rem;padding:12px 24px" onclick="_startExam()">Start Exam →</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function _startExam(){
+  app.innerHTML='<div class="page-wrap exam-page"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading exam questions…</p></div>';
+  let examData;
+  try{examData=await api('/api/exam/start');}
+  catch(e){app.innerHTML=`<div class="page-wrap exam-page"><div class="card"><button onclick="workspace()">← Workspace</button><p>Could not start exam. Try again.</p></div></div>`;return;}
+
+  const {exam_id,questions,total,time_limit_minutes}=examData;
+  const examAnswers={};
+  let currentQ=0;
+  const endTime=Date.now()+time_limit_minutes*60*1000;
+  let timerInterval=null;
+
+  function _formatTime(ms){
+    const s=Math.max(0,Math.floor(ms/1000));
+    const m=Math.floor(s/60);const sec=s%60;
+    return m+':'+(sec<10?'0':'')+sec;
+  }
+
+  function _renderExam(){
+    const q=questions[currentQ];
+    const remaining=endTime-Date.now();
+    const timerClass=remaining<5*60*1000?'exam-timer danger':remaining<20*60*1000?'exam-timer warning':'exam-timer';
+    const pct=Math.round((currentQ+1)/total*100);
+    const choices=q.choices.map(c=>`<button class="exam-choice${examAnswers[q.id]===c.id?' selected':''}" onclick="_examSelect(${q.id},${c.id})">${esc(c.text)}</button>`).join('');
+    const isLast=currentQ===total-1;
+    app.innerHTML=`<div class="page-wrap exam-page">
+      <div class="exam-header">
+        <span style="font-size:.85rem;font-weight:600;color:var(--text-muted)">Question ${currentQ+1} of ${total}</span>
+        <span class="${timerClass}" id="examTimer">${_formatTime(remaining)}</span>
+      </div>
+      <div class="exam-progress-bar"><div class="exam-progress-fill" style="width:${pct}%"></div></div>
+      <p class="exam-question">${esc(q.question_text)}</p>
+      <div>${choices}</div>
+      <div class="exam-nav">
+        <button class="ghost" ${currentQ===0?'disabled':''} onclick="_examPrev()">← Previous</button>
+        <span style="font-size:.78rem;color:var(--text-muted)">${q.module_title}</span>
+        ${isLast
+          ?`<button class="primary" onclick="_examSubmitConfirm()">Submit Exam</button>`
+          :`<button class="primary" onclick="_examNext()">Next →</button>`}
+      </div>
+      ${isLast?'':''}<div style="text-align:center;margin-top:16px"><button class="ghost" style="font-size:.75rem;color:var(--text-muted)" onclick="_examSubmitConfirm()">Submit early</button></div>
+    </div>`;
+    // Restart timer display
+    if(timerInterval)clearInterval(timerInterval);
+    timerInterval=setInterval(()=>{
+      const el=document.getElementById('examTimer');
+      if(!el){clearInterval(timerInterval);return;}
+      const rem=endTime-Date.now();
+      if(rem<=0){clearInterval(timerInterval);_examSubmit();return;}
+      el.textContent=_formatTime(rem);
+      el.className=rem<5*60*1000?'exam-timer danger':rem<20*60*1000?'exam-timer warning':'exam-timer';
+    },1000);
+  }
+
+  window._examSelect=function(qId,cId){examAnswers[qId]=cId;_renderExam();};
+  window._examNext=function(){if(currentQ<total-1){currentQ++;_renderExam();}};
+  window._examPrev=function(){if(currentQ>0){currentQ--;_renderExam();}};
+  window._examSubmitConfirm=function(){
+    const answered=Object.keys(examAnswers).length;
+    const unanswered=total-answered;
+    if(unanswered>0){
+      if(!confirm(`You have ${unanswered} unanswered question${unanswered!==1?'s':''}. Submit anyway?`))return;
+    }
+    _examSubmit();
+  };
+  async function _examSubmit(){
+    if(timerInterval)clearInterval(timerInterval);
+    app.innerHTML='<div class="page-wrap exam-page"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Scoring your exam…</p></div>';
+    let results;
+    try{results=await api('/api/exam/'+exam_id+'/submit',{method:'POST',body:JSON.stringify({answers:examAnswers})});}
+    catch(e){app.innerHTML=`<div class="page-wrap exam-page"><div class="card"><p>Error submitting exam. Please try again.</p></div></div>`;return;}
+    _renderResults(results);
+  }
+
+  function _renderResults(r){
+    const passed=r.passed;
+    const modRows=Object.entries(r.module_scores||{})
+      .sort((a,b)=>a[1].pct-b[1].pct)
+      .map(([slug,s])=>`<tr><td>${esc(s.title)}</td><td class="${s.pct<70?'exam-module-weak':'exam-module-strong'}">${s.correct}/${s.total} ${s.pct}%</td></tr>`)
+      .join('');
+    const missedHtml=(r.missed_questions||[]).slice(0,10).map(q=>`<li style="margin-bottom:8px;font-size:.82rem"><strong>${esc(q.question_text)}</strong><br><span style="color:#16a34a">✓ ${esc(q.correct_answer)}</span>${q.your_answer&&q.your_answer!==q.correct_answer?`<span style="color:#dc2626"> · Your answer: ${esc(q.your_answer)}</span>`:''}</li>`).join('');
+    app.innerHTML=`<div class="page-wrap exam-results">
+      <div class="exam-score-banner ${passed?'pass':'fail'}">
+        <div class="exam-score-number" style="color:${passed?'#16a34a':'#f59e0b'}">${r.score}%</div>
+        <div class="exam-pass-label">${passed?'✅ PASS':'❌ Not Yet — Keep Studying'}</div>
+        <div style="font-size:.82rem;color:var(--text-muted);margin-top:8px">Time taken: ${r.time_taken_minutes} min · ${r.correct}/${r.total} correct</div>
+        ${passed?'<p style="margin:12px 0 0;font-size:.9rem">Excellent work! You\'re ready for exam day.</p>':'<p style="margin:12px 0 0;font-size:.9rem">Review the weak areas below and keep practicing.</p>'}
+      </div>
+      <h3 class="dash-section-title">📊 Module Breakdown</h3>
+      <table class="exam-module-table"><tbody>${modRows}</tbody></table>
+      ${missedHtml?`<h3 class="dash-section-title">📝 Missed Questions</h3><ul style="padding-left:16px">${missedHtml}</ul>`:''}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:24px">
+        <button class="primary" onclick="_startExam()">Take Another Exam</button>
+        <button class="ghost" onclick="route('plan')">Study Weak Areas →</button>
+        <button class="ghost" onclick="showDashboard()">← Dashboard</button>
+      </div>
+    </div>`;
+  }
+
+  _renderExam();
+}
+
 async function toggleVoice(){
   if(!voiceEnabled){
     await initVoice();
@@ -577,6 +775,11 @@ async function showDashboard(){
           <div class="dash-recs">${recCards}</div>
         </section>`:''}
       </div>
+      <footer style="text-align:center;padding:24px 0 8px;font-size:.75rem;color:var(--text-muted)">
+        <a href="/privacy" style="color:var(--text-muted)" target="_blank">Privacy Policy</a>
+        &nbsp;·&nbsp;
+        <a href="/terms" style="color:var(--text-muted)" target="_blank">Terms of Use</a>
+      </footer>
     </div>
   </div>`;
 }

@@ -11,16 +11,27 @@ import re
 import subprocess
 import tempfile
 import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
+
+# ── Simple in-memory rate limiter ─────────────────────────────────────────────
+_voice_rate_limits: dict[str, list[float]] = defaultdict(list)
+
+def _voice_rate_limit(key: str, max_calls: int, window_seconds: int) -> None:
+    now = time.time()
+    _voice_rate_limits[key] = [t for t in _voice_rate_limits[key] if now - t < window_seconds]
+    if len(_voice_rate_limits[key]) >= max_calls:
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait a moment.")
+    _voice_rate_limits[key].append(now)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("voice")
@@ -200,7 +211,8 @@ def voices() -> list[str]:
 
 
 @app.post("/transcribe")
-async def transcribe(audio: UploadFile = File(...)) -> dict[str, Any]:
+async def transcribe(request: Request, audio: UploadFile = File(...)) -> dict[str, Any]:
+    _voice_rate_limit(request.client.host if request.client else "unknown", 10, 60)
     if _whisper_model is None:
         raise HTTPException(status_code=503, detail={"error": "whisper_unavailable"})
     try:
@@ -225,7 +237,8 @@ class SpeakRequest(BaseModel):
 
 
 @app.post("/speak")
-def speak(req: SpeakRequest) -> Response:
+def speak(req: SpeakRequest, request: Request) -> Response:
+    _voice_rate_limit(request.client.host if request.client else "unknown", 10, 60)
     if _kokoro_pipeline is None:
         raise HTTPException(status_code=503, detail={"error": "kokoro_unavailable"})
     try:
@@ -238,10 +251,12 @@ def speak(req: SpeakRequest) -> Response:
 
 @app.post("/chat")
 async def chat(
+    request: Request,
     audio: UploadFile = File(...),
     voice: str = Form(default="af_heart"),
     conversation_history: str = Form(default="[]"),
 ) -> dict[str, Any]:
+    _voice_rate_limit(request.client.host if request.client else "unknown", 5, 120)
     t_start = time.time()
 
     # 1. Transcribe

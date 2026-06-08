@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import random
+import time
+import uuid
+import warnings
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -17,7 +21,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import configured_providers, dev_login, login_redirect, oauth_callback, public_user, require_user
 from .content_loader import seed_course_if_empty
 from .database import SessionLocal, create_all, get_db
-from .models import AnswerChoice, DiagnosticResult, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term
+from .models import AnswerChoice, DiagnosticResult, ExamSession, FlashcardProgress, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term
+from .ratelimit import rate_limit
 from .settings import settings
 from .tutor import ask_coverage_coach, call_ollama_raw  # noqa: F401 used in study_plan
 
@@ -44,6 +49,14 @@ class DiagnosticSubmitIn(BaseModel):
     answers: dict[int, int] = Field(default_factory=dict, description="question_id -> selected_choice_id")
 
 
+class FlashcardReviewIn(BaseModel):
+    rating: int = Field(ge=1, le=4)
+
+
+class ExamSubmitIn(BaseModel):
+    answers: dict[int, int] = Field(default_factory=dict, description="question_id -> choice_id")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_all()
@@ -52,11 +65,17 @@ async def lifespan(app: FastAPI):
         seed_course_if_empty(db)
     finally:
         db.close()
+    if settings.enable_dev_login and "localhost" not in settings.app_base_url:
+        warnings.warn("WARNING: ENABLE_DEV_LOGIN=true on a non-localhost URL. Disable before launch!")
     yield
 
 
-app = FastAPI(title="P&C License Prep Academy API", version="2.1.0", lifespan=lifespan)
-origins = settings.cors_origin_list
+_docs_url = "/docs" if settings.enable_dev_login else None
+_redoc_url = "/redoc" if settings.enable_dev_login else None
+app = FastAPI(title="P&C License Prep Academy API", version="2.1.0", lifespan=lifespan,
+              docs_url=_docs_url, redoc_url=_redoc_url)
+
+origins = settings.cors_origin_list if settings.enable_dev_login else [settings.app_base_url]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -65,6 +84,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax", https_only=settings.app_base_url.startswith("https"))
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next: Any) -> Any:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if not settings.enable_dev_login:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -239,6 +270,7 @@ def list_questions(module_slug: str | None = None, limit: int = Query(10, ge=1, 
 @app.post("/api/quiz/submit")
 def submit_quiz(payload: QuizSubmitIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
+    rate_limit(f"quiz:{user.id}", 20, 60)
     if len(payload.answers) > 50:
         raise HTTPException(status_code=400, detail="Submit 50 answers or fewer at a time")
 
@@ -330,6 +362,7 @@ def mistake_bank(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/tutor/ask")
 def tutor_ask(payload: TutorAskIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
+    rate_limit(f"tutor:{user.id}", 10, 60)
     return ask_coverage_coach(db, user, payload.message)
 
 
@@ -775,3 +808,334 @@ def diagnostic_status(request: Request, db: Session = Depends(get_db)) -> dict[s
         "score": result.score,
         "module_scores": json.loads(result.module_scores or "{}"),
     }
+
+
+# ── Flashcards ────────────────────────────────────────────────────────────────
+
+def _sm2(ease: float, interval: float, rating: int) -> tuple[float, float]:
+    if rating == 1:
+        return 1.3, 1.0
+    elif rating == 2:
+        return max(1.3, ease - 0.15), max(1.0, interval * 1.2)
+    elif rating == 3:
+        return ease, interval * ease
+    else:
+        return min(4.0, ease + 0.15), interval * min(4.0, ease + 0.15) * 1.3
+
+
+def _term_to_card(term: Term, progress: FlashcardProgress | None, now: datetime) -> dict[str, Any]:
+    due = progress is None or progress.next_review <= now
+    return {
+        "id": term.id,
+        "term": term.term,
+        "definition": term.exam_definition or term.plain_english_definition or "",
+        "example": term.example or "",
+        "module_title": term.module.title if term.module else "",
+        "module_slug": term.module.slug if term.module else "",
+        "due": due,
+        "interval_days": round(progress.interval_days, 2) if progress else 1.0,
+        "ease": round(progress.ease, 2) if progress else 2.5,
+        "review_count": progress.review_count if progress else 0,
+    }
+
+
+@app.get("/api/flashcards")
+def get_flashcards(
+    module_slug: str | None = None,
+    request: Request = None,
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    user = require_user(request, db)
+    now = datetime.now(timezone.utc)
+
+    q = select(Term).options(selectinload(Term.module))
+    if module_slug:
+        mod = db.scalar(select(Module).where(Module.slug == module_slug))
+        if mod:
+            q = q.where(Term.module_id == mod.id)
+    terms = db.scalars(q).all()
+
+    progress_map: dict[int, FlashcardProgress] = {
+        p.term_id: p
+        for p in db.scalars(
+            select(FlashcardProgress).where(FlashcardProgress.user_id == user.id)
+        ).all()
+    }
+
+    cards = [_term_to_card(t, progress_map.get(t.id), now) for t in terms]
+    # Due cards first, then new/not-due — both groups shuffled
+    due = [c for c in cards if c["due"]]
+    not_due = [c for c in cards if not c["due"]]
+    random.shuffle(due)
+    random.shuffle(not_due)
+    return due + not_due
+
+
+@app.post("/api/flashcards/{term_id}/review")
+def review_flashcard(
+    term_id: int,
+    payload: FlashcardReviewIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    user = require_user(request, db)
+    now = datetime.now(timezone.utc)
+
+    term = db.scalar(select(Term).where(Term.id == term_id))
+    if not term:
+        raise HTTPException(status_code=404, detail="Term not found")
+
+    progress = db.scalar(
+        select(FlashcardProgress).where(
+            FlashcardProgress.user_id == user.id,
+            FlashcardProgress.term_id == term_id,
+        )
+    )
+    if not progress:
+        progress = FlashcardProgress(user_id=user.id, term_id=term_id)
+        db.add(progress)
+
+    new_ease, new_interval = _sm2(progress.ease, progress.interval_days, payload.rating)
+    progress.ease = new_ease
+    progress.interval_days = new_interval
+    progress.review_count = (progress.review_count or 0) + 1
+    progress.last_reviewed = now
+    progress.next_review = now + timedelta(days=new_interval)
+    db.commit()
+    db.refresh(progress)
+
+    return {
+        "term_id": term_id,
+        "ease": round(progress.ease, 2),
+        "interval_days": round(progress.interval_days, 2),
+        "review_count": progress.review_count,
+        "next_review": progress.next_review.isoformat(),
+    }
+
+
+# ── Exam Session ──────────────────────────────────────────────────────────────
+
+@app.get("/api/exam/start")
+def exam_start(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user = require_user(request, db)
+
+    all_modules = db.scalars(select(Module).where(Module.is_active == True)).all()
+    questions_per_module: dict[int, list[Question]] = {}
+    for mod in all_modules:
+        qs = db.scalars(
+            select(Question)
+            .options(selectinload(Question.choices), selectinload(Question.module))
+            .where(Question.module_id == mod.id)
+        ).all()
+        if qs:
+            questions_per_module[mod.id] = list(qs)
+
+    # Proportional allocation up to 50 questions
+    total_available = sum(len(v) for v in questions_per_module.values())
+    target = min(50, total_available)
+    selected: list[Question] = []
+    if questions_per_module:
+        base = max(1, target // len(questions_per_module))
+        for mod_id, qs in questions_per_module.items():
+            pick = random.sample(qs, min(base, len(qs)))
+            selected.extend(pick)
+        # Top up to target if under
+        used_ids = {q.id for q in selected}
+        remaining = [q for qs in questions_per_module.values() for q in qs if q.id not in used_ids]
+        random.shuffle(remaining)
+        selected.extend(remaining[: max(0, target - len(selected))])
+
+    random.shuffle(selected)
+
+    exam_id = str(uuid.uuid4())
+    session = ExamSession(
+        id=exam_id,
+        user_id=user.id,
+        total_questions=len(selected),
+    )
+    db.add(session)
+    db.commit()
+
+    def _q_out(q: Question) -> dict[str, Any]:
+        choices = list(q.choices)
+        random.shuffle(choices)
+        return {
+            "id": q.id,
+            "question_text": q.question_text,
+            "module_title": q.module.title if q.module else "",
+            "module_slug": q.module.slug if q.module else "",
+            "choices": [{"id": c.id, "text": c.choice_text} for c in choices],
+        }
+
+    return {
+        "exam_id": exam_id,
+        "questions": [_q_out(q) for q in selected],
+        "total": len(selected),
+        "time_limit_minutes": 90,
+    }
+
+
+@app.post("/api/exam/{exam_id}/submit")
+def exam_submit(
+    exam_id: str,
+    payload: ExamSubmitIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    user = require_user(request, db)
+    session = db.scalar(select(ExamSession).where(ExamSession.id == exam_id, ExamSession.user_id == user.id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    if session.status == "completed":
+        return json.loads(session.results_json)
+
+    now = datetime.now(timezone.utc)
+    started = session.started_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    time_taken = round((now - started).total_seconds() / 60, 1)
+
+    correct_total = 0
+    module_scores: dict[str, dict[str, Any]] = {}
+    missed_questions: list[dict[str, Any]] = []
+
+    for q_id_str, choice_id in payload.answers.items():
+        q = db.scalar(
+            select(Question)
+            .options(selectinload(Question.choices), selectinload(Question.module))
+            .where(Question.id == int(q_id_str))
+        )
+        if not q:
+            continue
+        correct_choice = next((c for c in q.choices if c.is_correct), None)
+        chosen_choice = next((c for c in q.choices if c.id == int(choice_id)), None)
+        is_correct = correct_choice is not None and chosen_choice is not None and correct_choice.id == chosen_choice.id
+
+        slug = q.module.slug if q.module else "unknown"
+        title = q.module.title if q.module else "Unknown"
+        if slug not in module_scores:
+            module_scores[slug] = {"title": title, "correct": 0, "total": 0, "pct": 0}
+        module_scores[slug]["total"] += 1
+        if is_correct:
+            correct_total += 1
+            module_scores[slug]["correct"] += 1
+        else:
+            missed_questions.append({
+                "id": q.id,
+                "question_text": q.question_text,
+                "correct_answer": correct_choice.choice_text if correct_choice else "",
+                "your_answer": chosen_choice.choice_text if chosen_choice else "No answer",
+                "module_title": title,
+            })
+            # Add to mistake bank
+            existing_mistake = db.scalar(
+                select(MistakeBank).where(MistakeBank.user_id == user.id, MistakeBank.question_id == q.id)
+            )
+            if existing_mistake:
+                existing_mistake.times_missed += 1
+                existing_mistake.last_missed_at = now
+            else:
+                db.add(MistakeBank(user_id=user.id, question_id=q.id, times_missed=1))
+
+    for slug in module_scores:
+        s = module_scores[slug]
+        s["pct"] = round(s["correct"] / s["total"] * 100) if s["total"] else 0
+
+    total_q = max(1, len(payload.answers))
+    score_pct = round(correct_total / total_q * 100)
+    passed = score_pct >= 70
+
+    results = {
+        "score": score_pct,
+        "passed": passed,
+        "correct": correct_total,
+        "total": total_q,
+        "time_taken_minutes": time_taken,
+        "module_scores": module_scores,
+        "missed_questions": missed_questions[:20],
+    }
+
+    session.status = "completed"
+    session.completed_at = now
+    session.score = score_pct
+    session.answers_json = json.dumps({str(k): v for k, v in payload.answers.items()})
+    session.results_json = json.dumps(results)
+    db.commit()
+
+    return results
+
+
+@app.get("/api/exam/{exam_id}/results")
+def exam_results(exam_id: str, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user = require_user(request, db)
+    session = db.scalar(select(ExamSession).where(ExamSession.id == exam_id, ExamSession.user_id == user.id))
+    if not session or session.status != "completed":
+        raise HTTPException(status_code=404, detail="Results not available")
+    return json.loads(session.results_json)
+
+
+# ── Account deletion ──────────────────────────────────────────────────────────
+
+@app.delete("/api/account")
+def delete_account(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user = require_user(request, db)
+    db.delete(user)
+    db.commit()
+    request.session.clear()
+    return {"ok": True, "message": "Account and all data deleted."}
+
+
+# ── Privacy & Terms ───────────────────────────────────────────────────────────
+
+_PRIVACY_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Privacy Policy — P&C Prep Academy</title>
+<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.7;color:#222}
+h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:2em}a{color:#6366f1}code{background:#f3f4f6;padding:2px 6px;border-radius:4px}</style>
+</head><body>
+<h1>Privacy Policy</h1>
+<p><em>Last updated: June 2026</em></p>
+<h2>What data we collect</h2>
+<p>When you sign in with Google, Microsoft, or Facebook we receive your <strong>email address</strong> and <strong>display name</strong>. No password is stored.</p>
+<p>As you study, we store: lesson completion records, quiz scores, practice quiz answers, mistake bank entries, flashcard review history, diagnostic quiz results, and exam simulation sessions. All of this is stored only to power your personalised study plan.</p>
+<h2>How data is used</h2>
+<p>Your data is used solely to provide the P&amp;C Prep Academy service. It is <strong>never sold</strong> and <strong>never shared with third parties</strong>.</p>
+<h2>Where data is stored</h2>
+<p>All data is stored on our own server. We do not use third-party analytics or advertising services.</p>
+<h2>How to delete your data</h2>
+<p>You can permanently delete your account and all associated data by sending a <code>DELETE /api/account</code> request while signed in. This is irreversible and cascades to all study records.</p>
+<h2>Cookies</h2>
+<p>We use a single session cookie to keep you signed in. No tracking or advertising cookies are used.</p>
+<h2>Contact</h2>
+<p>Questions? Email <a href="mailto:logan@weinsurethings.com">logan@weinsurethings.com</a>.</p>
+<p><a href="/">← Back to app</a></p>
+</body></html>"""
+
+_TERMS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Terms of Use — P&C Prep Academy</title>
+<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.7;color:#222}
+h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:2em}a{color:#6366f1}</style>
+</head><body>
+<h1>Terms of Use</h1>
+<p><em>Last updated: June 2026</em></p>
+<h2>Educational tool only</h2>
+<p>P&amp;C Prep Academy is a free educational study tool. It is designed to help you prepare for the P&amp;C insurance licensing exam. It does <strong>not</strong> guarantee that you will pass the exam.</p>
+<h2>Not professional or legal advice</h2>
+<p>Nothing on this platform constitutes professional, legal, or insurance advice. Study content is prepared for educational purposes only.</p>
+<h2>Age requirement</h2>
+<p>You must be 18 years of age or older to use this service, or have obtained parental/guardian consent.</p>
+<h2>No warranty</h2>
+<p>This service is provided "as is" without warranty of any kind. We make no representations about the accuracy or completeness of the study content.</p>
+<h2>Account termination</h2>
+<p>We reserve the right to suspend or delete accounts that misuse the platform.</p>
+<h2>Changes to terms</h2>
+<p>We may update these terms at any time. Continued use of the service constitutes acceptance of the current terms.</p>
+<p><a href="/">← Back to app</a></p>
+</body></html>"""
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy() -> str:
+    return _PRIVACY_HTML
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms_page() -> str:
+    return _TERMS_HTML

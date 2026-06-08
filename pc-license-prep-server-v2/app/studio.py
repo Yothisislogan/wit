@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .auth import require_user
 from .database import get_db
 from .models import Lesson, Module, Term
+from .ratelimit import rate_limit
 from .settings import settings
 from .tutor import generate_studio_content
 
@@ -59,7 +60,8 @@ def coach_health():
 
 @router.post("/api/studio/generate")
 def studio_generate(body: StudioRequest, request: Request, db: Session = Depends(get_db)):
-    require_user(request, db)
+    user = require_user(request, db)
+    rate_limit(f"studio:{user.id}", 5, 60)
     module_title = "P&C Insurance"
     terms_data: list[dict[str, str]] = []
     lessons_data: list[dict[str, str]] = []
