@@ -3,16 +3,15 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import question_expander as qe
 from .course_seed import DEFAULT_COURSE
 from .course_seed_enrichment import enrich_course
-from .models import AnswerChoice, Lesson, Module, Question, Term
+from .models import Lesson, Module, Term
 
 
 # Seed loader for course content.
 def seed_course_if_empty(db: Session) -> None:
     enriched_course = enrich_course(DEFAULT_COURSE)
-    load_course(db, qe.expand_question_bank(enriched_course))
+    load_course(db, enriched_course)
 
 
 def load_course(db: Session, data: dict) -> None:
@@ -66,29 +65,6 @@ def load_course(db: Session, data: dict) -> None:
             ))
             existing_terms.add(term_data["term"].lower())
 
-        existing_question_texts = {row[0] for row in db.execute(select(Question.question_text).where(Question.module_id == module.id)).all()}
-        for question_data in module_data.get("questions", []):
-            if question_data["question_text"] in existing_question_texts:
-                continue
-            lesson = lessons_by_slug.get(question_data.get("lesson_slug", ""))
-            question = Question(
-                module_id=module.id,
-                lesson_id=lesson.id if lesson else None,
-                question_text=question_data["question_text"],
-                question_type=question_data.get("question_type", "multiple_choice"),
-                difficulty=question_data.get("difficulty", "standard"),
-                explanation=question_data.get("explanation", ""),
-                is_active=question_data.get("is_active", True),
-            )
-            db.add(question)
-            db.flush()
-            for idx, choice_data in enumerate(question_data.get("choices", []), start=1):
-                db.add(AnswerChoice(
-                    question_id=question.id,
-                    choice_text=choice_data["choice_text"],
-                    is_correct=choice_data.get("is_correct", False),
-                    explanation=choice_data.get("explanation", ""),
-                    sort_order=choice_data.get("sort_order", idx),
-                ))
-            existing_question_texts.add(question_data["question_text"])
+        # Questions are seeded separately via scripts/load_real_questions.py.
+
     db.commit()

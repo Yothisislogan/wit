@@ -835,16 +835,21 @@ def main():
     create_all()
     db = SessionLocal()
     try:
-        # Remove all existing questions and choices
+        # Remove all existing questions and choices.
+        # Guard: if the DB already looks clean (≤100 questions), skip the delete
+        # to avoid accidentally wiping a freshly-loaded set on a double-run.
         existing = db.scalars(select(Question)).all()
         deleted = 0
-        for q in existing:
-            for c in q.choices:
-                db.delete(c)
-            db.delete(q)
-            deleted += 1
-        db.flush()
-        print(f"Deleted {deleted} existing questions.")
+        if len(existing) <= 100:
+            print(f"DB already has {len(existing)} questions (≤100) — skipping delete, reloading anyway.")
+        else:
+            for q in existing:
+                for c in q.choices:
+                    db.delete(c)
+                db.delete(q)
+                deleted += 1
+            db.flush()
+            print(f"Deleted {deleted} existing questions.")
 
         loaded = 0
         for module_slug, questions in REAL_QUESTIONS.items():
