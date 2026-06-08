@@ -1,6 +1,7 @@
 const app=document.getElementById('app');
 const toastEl=document.getElementById('toast');
 let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];let studioModuleSlug='';
+let voiceEnabled=false;let selectedVoice='af_heart';let voiceHistory=[];let mediaRecorder=null;let isRecording=false;let audioChunks=[];let currentAudio=null;let _voiceInitialized=false;
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
@@ -22,7 +23,11 @@ async function _loadRefTerms(slug){
     body.innerHTML=`<div class="ref-terms">${terms.map(t=>`<div class="ref-term"><strong>${esc(t.term)}</strong><p>${esc(t.exam_definition||t.plain_english_definition)}</p></div>`).join('')}</div>`;
   }catch(e){body.innerHTML='<div class="ref-loading">Could not load terms.</div>';}
 }
-function chatPanel(){const defaultIntro=`<div class="message assistant intro"><p>Hi! I'm <strong>Coverage Coach</strong>, your P&amp;C licensing study tutor. I know the full course — every lesson, term, and concept.</p><p>Ask me to explain a tricky topic, quiz you on key terms, compare coverages, or tell you where to focus before the exam. Use the <strong>Studio panel →</strong> to generate study guides, cram sheets, and practice quizzes.</p><p>What do you want to work on today?</p></div>`;return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('Am I ready for the real thing?')">Am I ready for the real thing?</button><button onclick="quickAsk('What are the most commonly missed topics on the P&amp;C exam?')">Most commonly missed P&amp;C exam topics</button><button onclick="quickAsk('Explain the difference between replacement cost and actual cash value')">Replacement cost vs. actual cash value</button><button onclick="quickAsk('Quiz me on the most important terms I need to know')">Quiz me on important terms</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div></div></section>`}
+function chatPanel(){
+  const defaultIntro=`<div class="message assistant intro"><p>Hi! I'm <strong>Coverage Coach</strong>, your P&amp;C licensing study tutor. I know the full course — every lesson, term, and concept.</p><p>Ask me to explain a tricky topic, quiz you on key terms, compare coverages, or tell you where to focus before the exam. Use the <strong>Studio panel →</strong> to generate study guides, cram sheets, and practice quizzes.</p><p>What do you want to work on today?</p></div>`;
+  const voiceControlsHtml=voiceEnabled?`<div class="voice-controls"><select class="voice-select" id="voiceSelect" onchange="selectedVoice=this.value">${(window._voiceList||[selectedVoice]).map(v=>`<option value="${esc(v)}"${v===selectedVoice?' selected':''}>${esc(v)}</option>`).join('')}</select><button class="ptt-btn${isRecording?' recording':''}" id="pttBtn" onmousedown="startRecording()" onmouseup="stopRecordingAndSend()" onmouseleave="isRecording&&stopRecordingAndSend()" ontouchstart="startRecording()" ontouchend="stopRecordingAndSend()">${isRecording?'🔴 Recording…':'🎤 Hold to Talk'}</button><button class="stop-btn icon-btn" onclick="stopAudio()" title="Stop playback">⏹</button></div><div class="voice-status" id="voiceStatus">Ready</div>`:'';
+  return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('Am I ready for the real thing?')">Am I ready for the real thing?</button><button onclick="quickAsk('What are the most commonly missed topics on the P&amp;C exam?')">Most commonly missed P&amp;C exam topics</button><button onclick="quickAsk('Explain the difference between replacement cost and actual cash value')">Replacement cost vs. actual cash value</button><button onclick="quickAsk('Quiz me on the most important terms I need to know')">Quiz me on important terms</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div><div class="voice-toolbar"><button class="voice-toggle-btn${voiceEnabled?' active':''}" onclick="toggleVoice()">${voiceEnabled?'🔴 Voice On':'🎙️ Voice Coach'}</button>${voiceControlsHtml}</div></div></section>`;
+}
 function studioPanel(){
   const opts=modules.map(m=>`<option value="${esc(m.slug)}"${m.slug===studioModuleSlug?' selected':''}>${esc(m.title)}</option>`).join('');
   return `<aside class="pane"><div class="pane-head"><h2>Studio</h2>
@@ -359,6 +364,114 @@ async function showPlan(){
     const weakEl=document.getElementById('planWeak');if(weakEl)weakEl.innerHTML='<li class="plan-area-item plan-muted">—</li>';
     const strongEl=document.getElementById('planStrong');if(strongEl)strongEl.innerHTML='<li class="plan-area-item plan-muted">—</li>';
   });
+}
+async function toggleVoice(){
+  if(!voiceEnabled){
+    await initVoice();
+  } else {
+    voiceEnabled=false;
+    stopAudio();
+    if(mediaRecorder&&isRecording){try{mediaRecorder.stop();}catch(e){} isRecording=false;}
+    const panel=document.querySelector('.pane.center');if(panel)panel.outerHTML=chatPanel();
+    scrollMessages();
+  }
+}
+async function initVoice(){
+  if(!_voiceInitialized){
+    try{
+      const list=await fetch('http://localhost:8001/voices').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});
+      window._voiceList=list;
+      if(list.length&&!list.includes(selectedVoice))selectedVoice=list[0];
+      _voiceInitialized=true;
+    }catch(e){
+      setVoiceStatus('Voice service offline — run scripts/start_voice_service.sh');
+      toast('Voice service unreachable');
+      return;
+    }
+  }
+  voiceEnabled=true;
+  const panel=document.querySelector('.pane.center');if(panel)panel.outerHTML=chatPanel();
+  scrollMessages();
+  setVoiceStatus('Ready');
+}
+async function startRecording(){
+  if(isRecording)return;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    audioChunks=[];
+    mediaRecorder=new MediaRecorder(stream,{mimeType:'audio/webm'});
+    mediaRecorder.ondataavailable=e=>{if(e.data.size>0)audioChunks.push(e.data);};
+    mediaRecorder.start();
+    isRecording=true;
+    const btn=document.getElementById('pttBtn');
+    if(btn){btn.textContent='🔴 Recording…';btn.classList.add('recording');}
+    setVoiceStatus('Recording…');
+  }catch(e){
+    toast('Microphone access denied');
+    setVoiceStatus('Microphone error — check browser permissions');
+  }
+}
+async function stopRecordingAndSend(){
+  if(!isRecording||!mediaRecorder)return;
+  isRecording=false;
+  const btn=document.getElementById('pttBtn');
+  if(btn){btn.textContent='🎤 Hold to Talk';btn.classList.remove('recording');}
+  setVoiceStatus('Transcribing…');
+  await new Promise(resolve=>{
+    mediaRecorder.onstop=resolve;
+    mediaRecorder.stop();
+    mediaRecorder.stream.getTracks().forEach(t=>t.stop());
+  });
+  const blob=new Blob(audioChunks,{type:'audio/webm'});
+  audioChunks=[];
+  const fd=new FormData();
+  fd.append('audio',blob,'recording.webm');
+  fd.append('voice',selectedVoice);
+  fd.append('conversation_history',JSON.stringify(voiceHistory.slice(-6)));
+  setVoiceStatus('Coach is thinking…');
+  try{
+    const resp=await fetch('http://localhost:8001/chat',{method:'POST',body:fd});
+    if(!resp.ok){const txt=await resp.text();throw new Error(txt);}
+    const data=await resp.json();
+    if(data.error==='no_speech'){setVoiceStatus('No speech detected — try again');return;}
+    chatMessages.push({role:'user',text:data.transcript});
+    chatMessages.push({role:'assistant',text:data.response_text});
+    voiceHistory.push({role:'user',content:data.transcript});
+    voiceHistory.push({role:'assistant',content:data.response_text});
+    if(voiceHistory.length>6)voiceHistory=voiceHistory.slice(-6);
+    // Re-render messages pane only (keep voice toolbar state)
+    const msgEl=document.getElementById('messages');
+    if(msgEl){
+      const defaultIntro=document.querySelector('.message.assistant.intro');
+      const introHtml=defaultIntro?defaultIntro.outerHTML:'';
+      msgEl.innerHTML=introHtml+chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('');
+    }
+    scrollMessages();
+    playAudioBase64(data.audio_base64);
+  }catch(e){
+    setVoiceStatus('Error: '+String(e).slice(0,80));
+    toast('Voice chat error');
+  }
+}
+function stopAudio(){
+  if(currentAudio){currentAudio.pause();currentAudio=null;}
+  setVoiceStatus('Ready');
+}
+function setVoiceStatus(msg){
+  const el=document.getElementById('voiceStatus');
+  if(el)el.textContent=msg;
+}
+function playAudioBase64(base64wav){
+  stopAudio();
+  const binary=atob(base64wav);
+  const bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  const blob=new Blob([bytes],{type:'audio/wav'});
+  const url=URL.createObjectURL(blob);
+  currentAudio=new Audio(url);
+  currentAudio.onended=()=>{URL.revokeObjectURL(url);setVoiceStatus('Ready');};
+  currentAudio.play();
+  setVoiceStatus('Speaking…');
 }
 boot();
 async function showDashboard(){

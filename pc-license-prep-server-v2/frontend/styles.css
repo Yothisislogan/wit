@@ -243,3 +243,14 @@ button.ghost{background:#fff;border:1px solid var(--line);color:#2d3135}
 .ref-terms{display:flex;flex-direction:column;gap:12px}
 .ref-term strong{display:block;font-size:.82rem;font-weight:700;color:var(--accent,#6366f1);margin-bottom:3px}
 .ref-term p{margin:0;font-size:.78rem;line-height:1.5;color:var(--text)}
+
+/* ── Voice toolbar ──────────────────────────────────────────────── */
+.voice-toolbar{border-top:1px solid var(--border);padding:10px 14px;background:var(--bg-card)}
+.voice-toggle-btn{font-size:.85rem;padding:6px 12px;border-radius:20px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text)}
+.voice-toggle-btn.active{background:#dc2626;color:white;border-color:#dc2626}
+.voice-controls{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.voice-select{font-size:.8rem;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)}
+.ptt-btn{font-size:.85rem;padding:8px 16px;background:var(--accent,#6366f1);color:white;border:none;border-radius:20px;cursor:pointer;user-select:none}
+.ptt-btn:active,.ptt-btn.recording{background:#dc2626;transform:scale(0.97)}
+.stop-btn{font-size:.85rem;padding:6px 10px}
+.voice-status{font-size:.75rem;color:var(--text-muted);margin-top:4px;min-height:18px}
