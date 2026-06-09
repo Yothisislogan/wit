@@ -16,6 +16,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), default="Student")
     avatar_url: Mapped[str | None] = mapped_column(Text)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    course: Mapped[str] = mapped_column(String(20), default="pc", server_default="pc")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -46,6 +47,7 @@ class Module(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    course: Mapped[str] = mapped_column(String(20), default="pc", server_default="pc", index=True)
 
     lessons: Mapped[list[Lesson]] = relationship(back_populates="module", cascade="all, delete-orphan", order_by="Lesson.sort_order")
     terms: Mapped[list[Term]] = relationship(back_populates="module", cascade="all, delete-orphan")

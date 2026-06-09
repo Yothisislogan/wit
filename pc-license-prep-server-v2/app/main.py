@@ -16,7 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import configured_providers, dev_login, login_redirect, oauth_callback, public_user, require_user
 from .content_loader import seed_course_if_empty
 from .database import SessionLocal, create_all, get_db
-from .models import AnswerChoice, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term
+from .models import AnswerChoice, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term, User
 from .settings import settings
 from .tutor import ask_coverage_coach
 
@@ -39,12 +39,19 @@ class TutorAskIn(BaseModel):
     message: str = Field(min_length=2, max_length=1200)
 
 
+class CourseIn(BaseModel):
+    course: str = Field(pattern="^(pc|lh)$")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_all()
     db = SessionLocal()
     try:
         seed_course_if_empty(db)
+        # Backfill course column on any modules that predate this field
+        db.execute(__import__("sqlalchemy").text("UPDATE modules SET course='pc' WHERE course IS NULL OR course=''"))
+        db.commit()
     finally:
         db.close()
     yield
@@ -168,13 +175,32 @@ def me(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get("user_id")
     if not user_id:
         return {"user": None}
-    user = db.get(__import__("app.models", fromlist=["User"]).User, int(user_id))
+    user = db.get(User, int(user_id))
     return {"user": public_user(user) if user else None}
 
 
+@app.post("/api/me/course")
+def set_course(payload: CourseIn, request: Request, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    user.course = payload.course
+    db.commit()
+    return {"ok": True, "course": user.course}
+
+
 @app.get("/api/modules")
-def list_modules(db: Session = Depends(get_db)):
-    modules = db.scalars(select(Module).options(selectinload(Module.lessons)).where(Module.is_active == True).order_by(Module.sort_order, Module.id)).all()
+def list_modules(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    course = "pc"
+    if user_id:
+        user = db.get(User, int(user_id))
+        if user:
+            course = user.course or "pc"
+    modules = db.scalars(
+        select(Module)
+        .options(selectinload(Module.lessons))
+        .where(Module.is_active == True, Module.course == course)
+        .order_by(Module.sort_order, Module.id)
+    ).all()
     return [module_out(m) for m in modules]
 
 
@@ -333,9 +359,15 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     """Aggregated progress data for the dashboard view."""
     user = require_user(request, db)
 
+    course = user.course or "pc"
+
     # ── Lesson completion ────────────────────────────────────────────
     total_lessons = (
-        db.scalar(select(func.count()).select_from(Lesson).where(Lesson.is_active == True)) or 0
+        db.scalar(
+            select(func.count()).select_from(Lesson)
+            .join(Module, Module.id == Lesson.module_id)
+            .where(Lesson.is_active == True, Module.course == course)
+        ) or 0
     )
     progress_rows = db.scalars(
         select(LessonProgress).where(LessonProgress.user_id == user.id)
@@ -345,7 +377,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     # ── Module breakdown + recommendations ──────────────────────────
     modules = db.scalars(
         select(Module)
-        .where(Module.is_active == True)
+        .where(Module.is_active == True, Module.course == course)
         .options(selectinload(Module.lessons))
         .order_by(Module.sort_order)
     ).all()

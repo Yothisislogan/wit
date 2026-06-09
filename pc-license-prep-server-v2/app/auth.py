@@ -71,6 +71,7 @@ def public_user(user: User) -> dict[str, Any]:
         "name": user.name,
         "avatar_url": user.avatar_url,
         "is_admin": user.is_admin,
+        "course": user.course or "pc",
     }
 
 

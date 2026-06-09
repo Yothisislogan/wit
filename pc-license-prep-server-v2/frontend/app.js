@@ -5,6 +5,20 @@ function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTim
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
+async function showCourseSelector(opts={}){
+  const courses=[
+    {id:'pc',icon:'🏠',title:'Property & Casualty',sub:'P&C License Exam Prep',detail:'14 modules · 90 lessons'},
+    {id:'lh',icon:'❤️',title:'Life & Health',sub:'L&H License Exam Prep',detail:'14 modules · coming soon',disabled:true}
+  ];
+  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What are you studying for?</h1><p class="course-sel-sub">Choose your license track. You can switch anytime.</p><div class="course-sel-grid">${courses.map(c=>`<button class="course-opt${c.id===(me&&me.course)?'  course-opt-active':''}${c.disabled?' course-opt-disabled':''}" onclick="pickCourse('${c.id}')" ${c.disabled?'disabled':''}><span class="course-opt-icon">${c.icon}</span><span class="course-opt-title">${esc(c.title)}</span><span class="course-opt-sub">${esc(c.sub)}</span><span class="course-opt-detail">${esc(c.detail)}</span></button>`).join('')}</div>${opts.switchable?'<button class="ghost" style="margin-top:1rem" onclick="showDashboard()">← Back to dashboard</button>':''}</div></div>`;
+}
+async function pickCourse(courseId){
+  const res=await api('/api/me/course',{method:'POST',body:JSON.stringify({course:courseId})});
+  me.course=res.course;
+  modules=await api('/api/modules');
+  chatMessages=[];
+  route('dashboard');
+}
 async function loginScreen(){
   const p=await api('/auth/providers');
   const providerBtns=p.providers.filter(x=>x.configured).map(x=>{
@@ -260,7 +274,7 @@ async function showDashboard(){
   app.innerHTML=`
   <div class="dash-page">
     <header class="dash-topbar-home">
-      <span class="dash-brand">◈ P&amp;C Prep Academy</span>
+      <span class="dash-brand">◈ ${me&&me.course==='lh'?'L&amp;H':'P&amp;C'} Prep Academy <button class="course-switch-link" onclick="showCourseSelector({switchable:true})">Switch</button></span>
       <div style="display:flex;align-items:center;gap:.6rem">
         <button class="primary dash-ws-btn" onclick="workspace()">Workspace →</button>
         <button class="ghost signout-btn" onclick="logout()" title="Sign out">Sign out</button>
