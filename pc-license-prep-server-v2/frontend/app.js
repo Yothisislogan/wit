@@ -55,7 +55,14 @@ function studioPanel(){
     <strong>Pick a module and a tile to generate study content.</strong>
     <p>Study Guide and Practice Quiz use Coverage Coach (Ollama). Cram Sheet is instant.</p></div>
   </div></div></aside>`}
-async function workspace(){app.innerHTML=`<div class="workspace"><div class="ws-topbar"><button class="ws-back-btn" onclick="showDashboard()">← Dashboard</button><span class="ws-topbar-title">◈ Study Workspace</span></div><div class="ws-panels">${sourcePanel()}${chatPanel()}${studioPanel()}</div></div>`;scrollMessages();if(typeof studioModuleSlug!=='undefined'&&!studioModuleSlug&&modules.length){studioModuleSlug=modules[0].slug;const sel=document.getElementById('studioModuleSelect');if(sel)sel.value=studioModuleSlug;}}
+let _wsPanel='chat';
+function _wsTab(p){_wsPanel=p;const panels=document.querySelectorAll('.ws-panels>.pane');const tabs=document.querySelectorAll('.ws-mob-tab');const order=['sources','chat','studio'];panels.forEach((el,i)=>{el.classList.toggle('ws-pane-hidden',order[i]!==p)});tabs.forEach(t=>{t.classList.toggle('ws-mob-tab-active',t.dataset.p===p)})}
+async function workspace(){
+  app.innerHTML=`<div class="workspace"><div class="ws-topbar"><button class="ws-back-btn" onclick="showDashboard()">← Dashboard</button><span class="ws-topbar-title">◈ Study Workspace</span></div><div class="ws-panels">${sourcePanel()}${chatPanel()}${studioPanel()}</div><nav class="ws-mob-nav"><button class="ws-mob-tab" data-p="sources" onclick="_wsTab('sources')">📚 Reference</button><button class="ws-mob-tab ws-mob-tab-active" data-p="chat" onclick="_wsTab('chat')">💬 Chat</button><button class="ws-mob-tab" data-p="studio" onclick="_wsTab('studio')">✦ Studio</button></nav></div>`;
+  _wsTab(_wsPanel);
+  scrollMessages();
+  if(typeof studioModuleSlug!=='undefined'&&!studioModuleSlug&&modules.length){studioModuleSlug=modules[0].slug;const sel=document.getElementById('studioModuleSelect');if(sel)sel.value=studioModuleSlug;}
+}
 function scrollMessages(){setTimeout(()=>{const el=document.getElementById('messages');if(el)el.scrollTop=el.scrollHeight},50)}
 function quickAsk(text){const q=document.getElementById('coachQuestion');if(q){q.value=text;askCoach()}else{chatMessages.push({role:'user',text});route('dashboard').then(()=>askCoachText(text))}}
 async function askCoach(){const box=document.getElementById('coachQuestion');const message=(box?.value||'').trim();if(!message){toast('Ask a question first');return}box.value='';await askCoachText(message)}
