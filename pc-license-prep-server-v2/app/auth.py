@@ -64,7 +64,8 @@ def require_user(request: Request, db: Session) -> User:
     return user
 
 
-def public_user(user: User) -> dict[str, Any]:
+def public_user(user: User, state_names: dict[str, str] | None = None) -> dict[str, Any]:
+    st = user.state
     return {
         "id": user.id,
         "email": user.email,
@@ -72,6 +73,8 @@ def public_user(user: User) -> dict[str, Any]:
         "avatar_url": user.avatar_url,
         "is_admin": user.is_admin,
         "course": user.course or "pc",
+        "state": st,
+        "state_name": (state_names or {}).get(st, "") if st else "",
     }
 
 

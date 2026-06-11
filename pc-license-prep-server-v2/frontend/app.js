@@ -4,7 +4,7 @@ let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessag
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
-async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
+async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}modules=await api('/api/modules');chatMessages=[];if(!me.state){return showStateSelector();}route('dashboard')}
 async function showCourseSelector(opts={}){
   const courses=[
     {id:'pc',icon:'🏠',title:'Property & Casualty',sub:'P&C License Exam Prep',detail:'14 modules · 90 lessons'},
@@ -17,6 +17,20 @@ async function pickCourse(courseId){
   me.course=res.course;
   modules=await api('/api/modules');
   chatMessages=[];
+  if(!me.state){return showStateSelector();}
+  route('dashboard');
+}
+const _US_STATES=[['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['DC','District of Columbia'],['FL','Florida'],['GA','Georgia'],['HI','Hawaii'],['ID','Idaho'],['IL','Illinois'],['IN','Indiana'],['IA','Iowa'],['KS','Kansas'],['KY','Kentucky'],['LA','Louisiana'],['ME','Maine'],['MD','Maryland'],['MA','Massachusetts'],['MI','Michigan'],['MN','Minnesota'],['MS','Mississippi'],['MO','Missouri'],['MT','Montana'],['NE','Nebraska'],['NV','Nevada'],['NH','New Hampshire'],['NJ','New Jersey'],['NM','New Mexico'],['NY','New York'],['NC','North Carolina'],['ND','North Dakota'],['OH','Ohio'],['OK','Oklahoma'],['OR','Oregon'],['PA','Pennsylvania'],['RI','Rhode Island'],['SC','South Carolina'],['SD','South Dakota'],['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],['VA','Virginia'],['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming']];
+function showStateSelector(opts={}){
+  const opts2=opts||{};
+  const sel=_US_STATES.map(([a,n])=>`<option value="${a}"${me&&me.state===a?' selected':''}>${n}</option>`).join('');
+  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What state are you getting licensed in?</h1><p class="course-sel-sub">We'll show your exam structure, vendor, and state-specific topics.</p><select id="stateDropdown" class="state-dropdown"><option value="">— Select your state —</option>${sel}</select><button class="primary" style="width:100%;margin-top:1rem" onclick="pickState()">Continue →</button><br><button class="ghost" style="margin-top:.5rem;font-size:.85rem;color:var(--muted)" onclick="${opts2.dashboard?'showDashboard()':'route(\'dashboard\')'}">Skip for now</button>${opts2.back?'<br><button class="ghost" style="margin-top:.25rem;font-size:.85rem" onclick="showDashboard()">← Back</button>':''}</div></div>`;
+}
+async function pickState(){
+  const val=document.getElementById('stateDropdown')?.value;
+  if(!val){toast('Please select a state first');return;}
+  const res=await api('/api/me/state',{method:'POST',body:JSON.stringify({state:val})});
+  me.state=res.state;me.state_name=res.state_name;
   route('dashboard');
 }
 async function loginScreen(){
@@ -278,6 +292,22 @@ async function showDashboard(){
     </button>`
   ).join('');
 
+  const course=me&&me.course==='lh'?'lh':'pc';
+  const stInfo=me&&me.state?await api('/api/state-info/'+me.state).catch(()=>null):null;
+  const examKey=course==='lh'?'lh_exam':'pc_exam';
+  const examData=stInfo&&stInfo[examKey];
+  const stateBanner=stInfo
+    ?`<div class="state-banner" id="stateBanner">
+        <span class="state-banner-loc">📍 <strong>${esc(stInfo.state_name)}</strong> <span class="state-banner-vendor">(${esc(stInfo.vendor)})</span></span>
+        <span class="state-banner-sep">·</span>
+        <span class="state-banner-exam">${course==='lh'?'L&H':'P&C'}: ${examData?examData.total_scored+' questions · '+examData.passing_score+'% to pass':'—'}</span>
+        <span class="state-banner-sep">·</span>
+        <button class="state-banner-btn" onclick="document.getElementById('stateTopics').classList.toggle('state-topics-open')">State topics ▾</button>
+        <button class="state-banner-btn" onclick="showStateSelector({dashboard:true,back:true})">Change state</button>
+        <div class="state-topics" id="stateTopics"><ul>${(stInfo.state_topics||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>${stInfo.outline_url?`<a href="${esc(stInfo.outline_url)}" target="_blank" rel="noopener" class="state-outline-link">View official exam outline →</a>`:''}</div>
+      </div>`
+    :`<div class="state-banner state-banner-empty"><span>📍 </span><button class="state-banner-btn" onclick="showStateSelector({dashboard:true,back:true})">Select your state to see your exam details →</button></div>`;
+
   app.innerHTML=`
   <div class="dash-page">
     <header class="dash-topbar-home">
@@ -287,6 +317,7 @@ async function showDashboard(){
         <button class="ghost signout-btn" onclick="logout()" title="Sign out">Sign out</button>
       </div>
     </header>
+    ${stateBanner}
     <div class="dash-wrap">
       <h1 class="dash-welcome">Welcome back${uname?', <strong>'+esc(uname)+'</strong>':''}!</h1>
       <div class="dash-hero">
