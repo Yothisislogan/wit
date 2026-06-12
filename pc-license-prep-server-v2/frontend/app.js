@@ -382,3 +382,45 @@ async function showDashboard(){
     </div>
   </div>`;
 }
+
+// ── VOICE / TTS ───────────────────────────────────────────────────────────────
+
+const VOICE_SERVICE = 'http://localhost:8001';
+
+async function loadVoices() {
+  try {
+    const res = await fetch(VOICE_SERVICE + '/voices');
+    const data = await res.json();
+    const sel = document.getElementById('voiceSelect');
+    if (!sel) return;
+    sel.innerHTML = data.voices.map(v =>
+      `<option value="${esc(v.id)}" ${v.id === data.default ? 'selected' : ''}>
+        ${esc(v.name)} — ${esc(v.description)}
+      </option>`
+    ).join('');
+  } catch(e) {
+    console.warn('Voice service not available:', e);
+  }
+}
+
+async function speakText(text, voiceId, language) {
+  const voice = voiceId || 'Ryan';
+  const lang = language || 'English';
+  try {
+    const res = await fetch(VOICE_SERVICE + '/tts', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text, voice, language: lang, instruct: ''})
+    });
+    if (!res.ok) throw new Error('TTS request failed: ' + res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    audio.play();
+    return audio;
+  } catch(e) {
+    console.warn('TTS playback error:', e);
+    return null;
+  }
+}
