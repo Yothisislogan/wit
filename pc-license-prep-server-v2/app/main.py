@@ -109,14 +109,17 @@ async def lifespan(app: FastAPI):
     create_all()
     db = SessionLocal()
     try:
+        for stmt in [
+            "ALTER TABLE users ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
+            "ALTER TABLE users ADD COLUMN state VARCHAR(2)",
+            "ALTER TABLE modules ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
+        ]:
+            try:
+                db.execute(text(stmt))
+                db.commit()
+            except Exception:
+                db.rollback()
         seed_course_if_empty(db)
-        sql = __import__("sqlalchemy").text
-        db.execute(sql("UPDATE modules SET course='pc' WHERE course IS NULL OR course=''"))
-        try:
-            db.execute(sql("ALTER TABLE users ADD COLUMN state VARCHAR(2)"))
-        except Exception:
-            pass
-        db.commit()
     finally:
         db.close()
     yield
@@ -241,7 +244,13 @@ def me(request: Request, db: Session = Depends(get_db)):
     if not user_id:
         return {"user": None}
     user = db.get(User, int(user_id))
-    return {"user": public_user(user, _STATE_NAMES) if user else None}
+    if not user:
+        return {"user": None}
+    base = public_user(user)
+    course = getattr(user, "course", "pc") or "pc"
+    state = getattr(user, "state", None)
+    state_name = STATE_EXAM_INFO.get(state or "", {}).get("state_name") if state else None
+    return {"user": {**base, "course": course, "state": state, "state_name": state_name}}
 
 
 @app.post("/api/me/course")
@@ -272,19 +281,16 @@ def state_info(state_abbr: str):
 
 
 @app.get("/api/modules")
-def list_modules(request: Request, db: Session = Depends(get_db)):
+def list_modules(request: Request, course: str | None = Query(None), db: Session = Depends(get_db)):
     user_id = request.session.get("user_id")
-    course = "pc"
-    if user_id:
-        user = db.get(User, int(user_id))
-        if user:
-            course = user.course or "pc"
-    modules = db.scalars(
-        select(Module)
-        .options(selectinload(Module.lessons))
-        .where(Module.is_active == True, Module.course == course)
-        .order_by(Module.sort_order, Module.id)
-    ).all()
+    if not course and user_id:
+        u = db.get(User, int(user_id))
+        course = getattr(u, "course", "pc") if u else "pc"
+    stmt = select(Module).options(selectinload(Module.lessons)).where(Module.is_active == True)
+    if course:
+        stmt = stmt.where(Module.course == course)
+    stmt = stmt.order_by(Module.sort_order, Module.id)
+    modules = db.scalars(stmt).all()
     return [module_out(m) for m in modules]
 
 

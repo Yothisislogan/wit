@@ -42,7 +42,7 @@ button.ghost{background:#fff;border:1px solid var(--line);color:#2d3135}
 .state-banner-btn{background:none;border:none;color:var(--blue);font-size:.82rem;font-weight:600;cursor:pointer;padding:0;text-decoration:underline}
 .state-topics{display:none;width:100%;padding:.5rem 0 .25rem;border-top:1px solid #b8e0ef;margin-top:.3rem}
 .state-topics.state-topics-open{display:block}
-.state-topics ul{margin:0 0 .5rem 1.1rem;padding:0;font-size:.8rem;color:#0b4f6c;line-height:1.7}
+.state-topics ul{margin:0 0 .5rem 1.1rem;padding:0;font-size:.8rem;color:#0b4f6c;line-height:1.7;columns:2}
 .state-outline-link{font-size:.78rem;color:var(--blue)}
 .state-dropdown{width:100%;padding:.8rem 1rem;border:1.5px solid var(--line);border-radius:12px;font-size:1rem;background:#fff;margin-top:.5rem;cursor:pointer}
 .state-dropdown:focus{outline:none;border-color:var(--blue)}
@@ -158,3 +158,5 @@ button.ghost{background:#fff;border:1px solid var(--line);color:#2d3135}
 .lesson-nav-bottom button:disabled{opacity:.4;cursor:not-allowed}
 .lesson-coach{margin-top:14px;text-align:center}
 .lesson-coach button{font-size:.8rem;color:var(--text-muted)}
+/* Course badge */
+.course-badge:hover{opacity:.8}

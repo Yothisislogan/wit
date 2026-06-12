@@ -4,35 +4,37 @@ let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessag
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
-async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}modules=await api('/api/modules');chatMessages=[];if(!me.state){return showStateSelector();}route('dashboard')}
-async function showCourseSelector(opts={}){
+async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}if(!me.course){return courseSelector()}if(!me.state){return stateSelector()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
+async function courseSelector(opts={}){
   const courses=[
     {id:'pc',icon:'🏠',title:'Property & Casualty',sub:'P&C License Exam Prep',detail:'14 modules · 90 lessons'},
-    {id:'lh',icon:'❤️',title:'Life & Health',sub:'L&H License Exam Prep',detail:'14 modules · coming soon',disabled:true}
+    {id:'lh',icon:'❤️',title:'Life & Health',sub:'L&H License Exam Prep',detail:'14 modules · 90+ lessons'}
   ];
-  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What are you studying for?</h1><p class="course-sel-sub">Choose your license track. You can switch anytime.</p><div class="course-sel-grid">${courses.map(c=>`<button class="course-opt${c.id===(me&&me.course)?'  course-opt-active':''}${c.disabled?' course-opt-disabled':''}" onclick="pickCourse('${c.id}')" ${c.disabled?'disabled':''}><span class="course-opt-icon">${c.icon}</span><span class="course-opt-title">${esc(c.title)}</span><span class="course-opt-sub">${esc(c.sub)}</span><span class="course-opt-detail">${esc(c.detail)}</span></button>`).join('')}</div>${opts.switchable?'<button class="ghost" style="margin-top:1rem" onclick="showDashboard()">← Back to dashboard</button>':''}</div></div>`;
+  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What are you studying for?</h1><p class="course-sel-sub">Choose your license track. You can switch anytime.</p><div class="course-sel-grid">${courses.map(c=>`<button class="course-opt${c.id===(me&&me.course)?'  course-opt-active':''}" onclick="pickCourse('${c.id}')"><span class="course-opt-icon">${c.icon}</span><span class="course-opt-title">${esc(c.title)}</span><span class="course-opt-sub">${esc(c.sub)}</span><span class="course-opt-detail">${esc(c.detail)}</span></button>`).join('')}</div>${opts.switchable?'<button class="ghost" style="margin-top:1rem" onclick="showDashboard()">← Back to dashboard</button>':''}</div></div>`;
 }
 async function pickCourse(courseId){
   const res=await api('/api/me/course',{method:'POST',body:JSON.stringify({course:courseId})});
   me.course=res.course;
   modules=await api('/api/modules');
   chatMessages=[];
-  if(!me.state){return showStateSelector();}
+  if(!me.state){return stateSelector();}
   route('dashboard');
 }
 const _US_STATES=[['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['DC','District of Columbia'],['FL','Florida'],['GA','Georgia'],['HI','Hawaii'],['ID','Idaho'],['IL','Illinois'],['IN','Indiana'],['IA','Iowa'],['KS','Kansas'],['KY','Kentucky'],['LA','Louisiana'],['ME','Maine'],['MD','Maryland'],['MA','Massachusetts'],['MI','Michigan'],['MN','Minnesota'],['MS','Mississippi'],['MO','Missouri'],['MT','Montana'],['NE','Nebraska'],['NV','Nevada'],['NH','New Hampshire'],['NJ','New Jersey'],['NM','New Mexico'],['NY','New York'],['NC','North Carolina'],['ND','North Dakota'],['OH','Ohio'],['OK','Oklahoma'],['OR','Oregon'],['PA','Pennsylvania'],['RI','Rhode Island'],['SC','South Carolina'],['SD','South Dakota'],['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],['VA','Virginia'],['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming']];
-function showStateSelector(opts={}){
+function stateSelector(opts={}){
   const opts2=opts||{};
   const sel=_US_STATES.map(([a,n])=>`<option value="${a}"${me&&me.state===a?' selected':''}>${n}</option>`).join('');
-  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What state are you getting licensed in?</h1><p class="course-sel-sub">We'll show your exam structure, vendor, and state-specific topics.</p><select id="stateDropdown" class="state-dropdown"><option value="">— Select your state —</option>${sel}</select><button class="primary" style="width:100%;margin-top:1rem" onclick="pickState()">Continue →</button><br><button class="ghost" style="margin-top:.5rem;font-size:.85rem;color:var(--muted)" onclick="${opts2.dashboard?'showDashboard()':'route(\'dashboard\')'}">Skip for now</button>${opts2.back?'<br><button class="ghost" style="margin-top:.25rem;font-size:.85rem" onclick="showDashboard()">← Back</button>':''}</div></div>`;
+  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What state are you getting licensed in?</h1><p class="course-sel-sub">We'll show your exam structure, vendor, and state-specific topics.</p><select id="stateDropdown" class="state-dropdown"><option value="">— Select your state —</option>${sel}</select><button class="primary" style="width:100%;margin-top:1rem" onclick="pickState()">Continue →</button><br><button class="ghost" style="margin-top:.5rem;font-size:.85rem;color:var(--muted)" onclick="${opts2.dashboard?'showDashboard()':'skipState()'}">Skip for now</button>${opts2.back?'<br><button class="ghost" style="margin-top:.25rem;font-size:.85rem" onclick="showDashboard()">← Back</button>':''}</div></div>`;
 }
 async function pickState(){
   const val=document.getElementById('stateDropdown')?.value;
   if(!val){toast('Please select a state first');return;}
   const res=await api('/api/me/state',{method:'POST',body:JSON.stringify({state:val})});
   me.state=res.state;me.state_name=res.state_name;
+  modules=await api('/api/modules');chatMessages=[];
   route('dashboard');
 }
+async function skipState(){modules=await api('/api/modules');chatMessages=[];route('dashboard')}
 async function loginScreen(){
   const p=await api('/auth/providers');
   const providerBtns=p.providers.filter(x=>x.configured).map(x=>{
@@ -47,7 +49,7 @@ async function loginScreen(){
   app.innerHTML=`<div class="login-page"><section class="login-card"><div class="login-logo">◈</div><h1 class="login-title">P&amp;C Prep Academy</h1><p class="login-sub">Sign in to track your progress toward your license</p><div class="login-btns">${providerBtns}${devBtn}</div><p class="login-fine">By signing in you agree to our <a href="/terms">Terms of Use</a> and <a href="/privacy">Privacy Policy</a>.</p></section></div>`;
 }
 async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
-function sourcePanel(){return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
+function sourcePanel(){const courseLabel=me&&me.course==='lh'?'Life & Health':'Property & Casualty';return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><span class="course-badge" onclick="courseSelector()" title="Switch course" style="cursor:pointer;font-size:.75rem;padding:2px 8px;border-radius:12px;background:var(--accent-muted,#e8f0fe);color:var(--accent,#1a73e8);margin-left:8px">${esc(courseLabel)}</span><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
 function chatPanel(){const defaultIntro=`<div class="message assistant intro"><p>Once unzipped, you can upload the individual files—like <strong>PDFs, Google Docs, or even text files</strong>—using the <strong>Source Panel</strong> on the left. You can also add website links or YouTube URLs if those are part of your project!</p><p>By uploading these sources, I can help you summarize the contents, find specific details, or even generate a <strong>Study Guide</strong> or <strong>Practice Quiz</strong> to help you process everything quickly.</p><p>What kind of files do you have inside that ZIP folder? I'd be happy to help you figure out the best way to bring them in!</p><div class="note-actions"><button class="ghost">⚑ Save to note</button><button class="icon-btn">▥</button><button class="icon-btn">👍</button><button class="icon-btn">👎</button></div></div>`;return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('I have a mix of PDFs and text files')">I have a mix of PDFs and text files</button><button onclick="quickAsk('Can you explain how to add website links instead?')">Can you explain how to add website links instead?</button><button onclick="quickAsk('How many files can I upload to one notebook?')">How many files can I upload to one notebook?</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div></div></section>`}
 function studioPanel(){
   const opts=modules.map(m=>`<option value="${esc(m.slug)}"${m.slug===studioModuleSlug?' selected':''}>${esc(m.title)}</option>`).join('');
@@ -75,7 +77,38 @@ async function workspace(){
   app.innerHTML=`<div class="workspace"><div class="ws-topbar"><button class="ws-back-btn" onclick="showDashboard()">← Dashboard</button><span class="ws-topbar-title">◈ Study Workspace</span></div><div class="ws-panels">${sourcePanel()}${chatPanel()}${studioPanel()}</div><nav class="ws-mob-nav"><button class="ws-mob-tab" data-p="sources" onclick="_wsTab('sources')">📚 Reference</button><button class="ws-mob-tab ws-mob-tab-active" data-p="chat" onclick="_wsTab('chat')">💬 Chat</button><button class="ws-mob-tab" data-p="studio" onclick="_wsTab('studio')">✦ Studio</button></nav></div>`;
   _wsTab(_wsPanel);
   scrollMessages();
+  renderStateBanner();
   if(typeof studioModuleSlug!=='undefined'&&!studioModuleSlug&&modules.length){studioModuleSlug=modules[0].slug;const sel=document.getElementById('studioModuleSelect');if(sel)sel.value=studioModuleSlug;}
+}
+async function renderStateBanner(){
+  const head=document.querySelector('.pane.center .pane-head');
+  if(!head)return;
+  const existing=head.nextElementSibling;
+  if(existing&&existing.classList.contains('state-banner'))existing.remove();
+  if(me&&me.state){
+    let info=null;
+    try{info=await api('/api/state-info/'+me.state)}catch(e){}
+    if(info){
+      const exam=me.course==='lh'?info.lh_exam:info.pc_exam;
+      const banner=document.createElement('div');
+      banner.className='state-banner';
+      banner.innerHTML=`<span>📍 <strong>${esc(info.state_name)}</strong> · ${esc(info.vendor)} · ${exam.total_scored} questions · ${exam.passing_score}% to pass</span><button class="ghost" style="font-size:.8rem;padding:2px 8px" onclick="toggleStateTopics(this,${JSON.stringify(JSON.stringify(info.state_topics||[]))})">Topics ▾</button><button class="ghost" style="font-size:.8rem;padding:2px 8px" onclick="stateSelector({dashboard:true,back:true})">Change</button>`;
+      head.after(banner);
+    }
+  }else{
+    const banner=document.createElement('div');
+    banner.className='state-banner state-banner-empty';
+    banner.innerHTML=`<button class="ghost" style="font-size:.85rem" onclick="stateSelector()">📍 Select your state to see exam details →</button>`;
+    head.after(banner);
+  }
+}
+function toggleStateTopics(btn,topicsJson){
+  const topics=JSON.parse(topicsJson);
+  const existing=btn.parentElement.nextElementSibling;
+  if(existing&&existing.classList.contains('state-topics')){existing.remove();btn.textContent='Topics ▾';return}
+  const div=document.createElement('div');div.className='state-topics';
+  div.innerHTML=`<ul>${topics.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`;
+  btn.parentElement.after(div);btn.textContent='Topics ▴';
 }
 function scrollMessages(){setTimeout(()=>{const el=document.getElementById('messages');if(el)el.scrollTop=el.scrollHeight},50)}
 function quickAsk(text){const q=document.getElementById('coachQuestion');if(q){q.value=text;askCoach()}else{chatMessages.push({role:'user',text});route('dashboard').then(()=>askCoachText(text))}}
@@ -303,15 +336,15 @@ async function showDashboard(){
         <span class="state-banner-exam">${course==='lh'?'L&H':'P&C'}: ${examData?examData.total_scored+' questions · '+examData.passing_score+'% to pass':'—'}</span>
         <span class="state-banner-sep">·</span>
         <button class="state-banner-btn" onclick="document.getElementById('stateTopics').classList.toggle('state-topics-open')">State topics ▾</button>
-        <button class="state-banner-btn" onclick="showStateSelector({dashboard:true,back:true})">Change state</button>
+        <button class="state-banner-btn" onclick="stateSelector({dashboard:true,back:true})">Change state</button>
         <div class="state-topics" id="stateTopics"><ul>${(stInfo.state_topics||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>${stInfo.outline_url?`<a href="${esc(stInfo.outline_url)}" target="_blank" rel="noopener" class="state-outline-link">View official exam outline →</a>`:''}</div>
       </div>`
-    :`<div class="state-banner state-banner-empty"><span>📍 </span><button class="state-banner-btn" onclick="showStateSelector({dashboard:true,back:true})">Select your state to see your exam details →</button></div>`;
+    :`<div class="state-banner state-banner-empty"><span>📍 </span><button class="state-banner-btn" onclick="stateSelector({dashboard:true,back:true})">Select your state to see your exam details →</button></div>`;
 
   app.innerHTML=`
   <div class="dash-page">
     <header class="dash-topbar-home">
-      <span class="dash-brand">◈ ${me&&me.course==='lh'?'L&amp;H':'P&amp;C'} Prep Academy <button class="course-switch-link" onclick="showCourseSelector({switchable:true})">Switch</button></span>
+      <span class="dash-brand">◈ ${me&&me.course==='lh'?'L&amp;H':'P&amp;C'} Prep Academy <button class="course-switch-link" onclick="courseSelector({switchable:true})">Switch</button></span>
       <div style="display:flex;align-items:center;gap:.6rem">
         <button class="primary dash-ws-btn" onclick="workspace()">Workspace →</button>
         <button class="ghost signout-btn" onclick="logout()" title="Sign out">Sign out</button>
