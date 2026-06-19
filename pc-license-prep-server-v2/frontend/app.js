@@ -1,6 +1,6 @@
 const app=document.getElementById('app');
 const toastEl=document.getElementById('toast');
-let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];
+let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];let studioModuleSlug=null;
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
