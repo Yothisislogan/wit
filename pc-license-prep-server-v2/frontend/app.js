@@ -50,7 +50,30 @@ async function loginScreen(){
 }
 async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
 function sourcePanel(){const courseLabel=me&&me.course==='lh'?'Life & Health':'Property & Casualty';return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><span class="course-badge" onclick="courseSelector()" title="Switch course" style="cursor:pointer;font-size:.75rem;padding:2px 8px;border-radius:12px;background:var(--accent-muted,#e8f0fe);color:var(--accent,#1a73e8);margin-left:8px">${esc(courseLabel)}</span><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
-function chatPanel(){const defaultIntro=`<div class="message assistant intro"><p>Once unzipped, you can upload the individual files—like <strong>PDFs, Google Docs, or even text files</strong>—using the <strong>Source Panel</strong> on the left. You can also add website links or YouTube URLs if those are part of your project!</p><p>By uploading these sources, I can help you summarize the contents, find specific details, or even generate a <strong>Study Guide</strong> or <strong>Practice Quiz</strong> to help you process everything quickly.</p><p>What kind of files do you have inside that ZIP folder? I'd be happy to help you figure out the best way to bring them in!</p><div class="note-actions"><button class="ghost">⚑ Save to note</button><button class="icon-btn">▥</button><button class="icon-btn">👍</button><button class="icon-btn">👎</button></div></div>`;return `<section class="pane center"><div class="pane-head"><h2>Chat</h2><div class="pane-tools"><button class="icon-btn">⋮</button></div></div><div class="pane-body chat-body"><div class="messages" id="messages">${defaultIntro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div><div class="suggestions"><button onclick="quickAsk('I have a mix of PDFs and text files')">I have a mix of PDFs and text files</button><button onclick="quickAsk('Can you explain how to add website links instead?')">Can you explain how to add website links instead?</button><button onclick="quickAsk('How many files can I upload to one notebook?')">How many files can I upload to one notebook?</button></div><div class="composer"><textarea id="coachQuestion" placeholder="Ask a question or create something"></textarea><span class="composer-meta">0 sources</span><button class="send-btn" onclick="askCoach()">➜</button></div></div></section>`}
+function chatPanel(){
+  const intro = chatMessages.length === 0
+    ? `<div class="message assistant intro">
+        <p>👋 Hi! I'm <strong>Coverage Coach</strong> — your AI insurance exam tutor.</p>
+        <p>Ask me anything about insurance concepts, exam terms, state law, or practice questions. I'm here to help you pass.</p>
+        <p class="muted" style="font-size:.85rem">I only answer insurance licensing questions. Up to 20 questions/hour.</p>
+      </div>`
+    : '';
+  return `<section class="pane center">
+    <div class="pane-head"><h2>Coverage Coach</h2><div class="pane-tools"><button class="icon-btn" onclick="chatMessages=[];workspace()" title="Clear chat">✕</button></div></div>
+    <div class="pane-body chat-body">
+      <div class="messages" id="messages">${intro}${chatMessages.map(m=>`<div class="message ${m.role}">${esc(m.text)}</div>`).join('')}</div>
+      <div class="suggestions">
+        <button onclick="quickAsk('What is the difference between a peril and a hazard?')">Peril vs hazard?</button>
+        <button onclick="quickAsk('Explain coinsurance and how the penalty works')">Coinsurance penalty?</button>
+        <button onclick="quickAsk('What does subrogation mean in insurance?')">What is subrogation?</button>
+      </div>
+      <div class="composer">
+        <textarea id="coachQuestion" placeholder="Ask Coverage Coach an insurance question…"></textarea>
+        <button class="send-btn" onclick="askCoach()">➜</button>
+      </div>
+    </div>
+  </section>`;
+}
 function studioPanel(){
   const opts=modules.map(m=>`<option value="${esc(m.slug)}"${m.slug===studioModuleSlug?' selected':''}>${esc(m.title)}</option>`).join('');
   return `<aside class="pane"><div class="pane-head"><h2>Studio</h2>
