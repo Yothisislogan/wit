@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-import json
 import random
-import time
-import uuid
-import warnings
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -21,10 +16,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import configured_providers, dev_login, login_redirect, oauth_callback, public_user, require_user
 from .content_loader import seed_course_if_empty
 from .database import SessionLocal, create_all, get_db
-from .models import AnswerChoice, DiagnosticResult, ExamSession, FlashcardProgress, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term
-from .ratelimit import rate_limit
+from .models import AnswerChoice, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term, User
 from .settings import settings
-from .tutor import ask_coverage_coach, call_ollama_raw  # noqa: F401 used in study_plan
+from .tutor import ask_coverage_coach
 
 FRONTEND_DIR = __import__("pathlib").Path(__file__).resolve().parent.parent / "frontend"
 
@@ -45,16 +39,69 @@ class TutorAskIn(BaseModel):
     message: str = Field(min_length=2, max_length=1200)
 
 
-class DiagnosticSubmitIn(BaseModel):
-    answers: dict[int, int] = Field(default_factory=dict, description="question_id -> selected_choice_id")
+class CourseIn(BaseModel):
+    course: str = Field(pattern="^(pc|lh)$")
 
 
-class FlashcardReviewIn(BaseModel):
-    rating: int = Field(ge=1, le=4)
+class StateIn(BaseModel):
+    state: str = Field(min_length=2, max_length=2, pattern="^[A-Z]{2}$")
 
 
-class ExamSubmitIn(BaseModel):
-    answers: dict[int, int] = Field(default_factory=dict, description="question_id -> choice_id")
+STATE_EXAM_INFO: dict[str, Any] = {
+  "AL": {"state_name":"Alabama","vendor":"University of Alabama (self-administered)","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner powers and duties","Licensing and appointments","Unfair trade practices","Alabama Insurance Guaranty Association","Replacement rules","Marketing practices"],"outline_url":"https://aldoi.gov"},
+  "AK": {"state_name":"Alaska","vendor":"Pearson VUE","pc_exam":{"general":100,"state":40,"total_scored":140,"passing_score":70},"lh_exam":{"general":100,"state":40,"total_scored":140,"passing_score":70},"state_topics":["Director of Insurance powers","Definitions and insurer types","Licensing and appointments","Marketing practices and unfair trade practices","Alaska Insurance Guaranty Association","Life-specific: policy provisions, replacement, group life"],"outline_url":"https://www.pearsonvue.com/us/en/ak/insurance.html"},
+  "AZ": {"state_name":"Arizona","vendor":"Prometric","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Licensing requirements and disciplinary actions","State regulation of insurance transactions","Unfair practices (misrepresentation, rebating, discrimination, fraud)","Federal laws (ACA, Mental Health Parity, GINA, FCRA, GLBA)"],"outline_url":"https://www.prometric.com/arizona-insurance"},
+  "AR": {"state_name":"Arkansas","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":50,"state":30,"total_scored":80,"passing_score":70},"state_topics":["Commissioner powers","Licensing and appointments","Unfair trade practices","Arkansas Life and Health Guaranty Association","Replacement rules","State-mandated health benefits"],"outline_url":"https://www.pearsonvue.com/us/en/ar/insurance.html"},
+  "CA": {"state_name":"California","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Insurance Commissioner authority (elected, not appointed)","Unfair Practices Act (only Commissioner may prosecute)","Privacy: GLBA and California Insurance Information and Privacy Protection Act","California Life and Health Insurance Guarantee Association","False/fraudulent claims and unfair discrimination","Licensing: filing, renewal, continuing education, fiduciary duties"],"outline_url":"https://www.psiexams.com"},
+  "CO": {"state_name":"Colorado","vendor":"Pearson VUE","pc_exam":{"general":100,"state":20,"total_scored":120,"passing_score":70},"lh_exam":{"general":100,"state":20,"total_scored":120,"passing_score":70},"state_topics":["Commissioner powers, hearings, penalties","Producer licensing and responsibilities","Unfair competition and deceptive practices","Replacement and advertising rules","Annuity suitability standards"],"outline_url":"https://www.pearsonvue.com/us/en/co/insurance.html"},
+  "CT": {"state_name":"Connecticut","vendor":"Pearson VUE","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"state_topics":["Commissioner duties and powers","Licensing types and maintenance","Agent responsibilities and fiduciary duties","Marketing practices and privacy (IIPPA, FCRA)","Life-specific: solicitation, replacement, standard provisions, annuities"],"outline_url":"https://www.pearsonvue.com/us/en/ct/insurance.html"},
+  "DE": {"state_name":"Delaware","vendor":"Pearson VUE","pc_exam":{"general":100,"state":40,"total_scored":140,"passing_score":70},"lh_exam":{"general":100,"state":40,"total_scored":140,"passing_score":70},"state_topics":["Licensing and appointments","Marketing practices and ethics (rebating, twisting, fraud)","Insurance Commissioner powers","Guaranty association and policy statutes","Ethics: types of authority (express, implied, apparent), suitability, advertising"],"outline_url":"https://www.pearsonvue.com/us/en/de/insurance.html"},
+  "DC": {"state_name":"District of Columbia","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner powers and definitions","Licensing requirements and appointments","Unfair trade practices (rebating, misrepresentation, twisting, churning)","Fiduciary duties and AIDS/HIV law","DC Life and Health Insurance Guaranty Association"],"outline_url":"https://www.pearsonvue.com/us/en/dc/insurance.html"},
+  "FL": {"state_name":"Florida","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Regulatory structure: CFO, Financial Services Commission, DFS and OIR","Definitions and licensing (agent vs. agency, appointments)","Agent fiduciary duties and premium handling","Guaranty fund and ethics requirement","Unfair practices: sliding, coercion, misrepresentation, twisting, churning, rebating","Replacement and suitability/best-interest rules"],"outline_url":"https://www.pearsonvue.com/us/en/fl/insurance.html"},
+  "GA": {"state_name":"Georgia","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner of Insurance powers","Insurance definitions (domestic, foreign, alien, authorized)","Licensing of agents and counselors","Unfair trade practices and fiduciary duties","Georgia Life and Health Insurance Guaranty Association","Replacement regulations (Reg 120-2-24)"],"outline_url":"https://www.pearsonvue.com/us/en/ga/insurance.html"},
+  "HI": {"state_name":"Hawaii","vendor":"Pearson VUE","pc_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"lh_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"state_topics":["Insurance Commissioner authority","Definitions and types of insurers","Licensing and maintenance","Marketing practices and premium handling","Hawaii Insurance Guaranty Association","Life-specific: replacement, annuity suitability, variable contracts, spousal rights"],"outline_url":"https://www.pearsonvue.com/us/en/hi/insurance.html"},
+  "ID": {"state_name":"Idaho","vendor":"Pearson VUE","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"state_topics":["Director of Insurance responsibilities","Insurance definitions (admitted, non-admitted, domestic, foreign, alien)","Licensing and appointments","Producer responsibilities and contracts","Unfair trade practices (rebating, misrepresentation, twisting, fraud)"],"outline_url":"https://www.pearsonvue.com/us/en/id/insurance.html"},
+  "IL": {"state_name":"Illinois","vendor":"Pearson VUE","pc_exam":{"general":100,"state":33,"total_scored":133,"passing_score":70},"lh_exam":{"general":50,"state":31,"total_scored":81,"passing_score":70},"state_topics":["Director of Insurance powers and examinations","Producer licensing and registration","Fiduciary duties and compensation","Unfair marketing practices (misrepresentation, rebating, twisting, churning)","Life regulations: advertising (Reg 2001/2008), replacement (Reg 917), illustrations","Illinois Life and Health Insurance Guaranty Association"],"outline_url":"https://www.pearsonvue.com/us/en/il/insurance.html"},
+  "IN": {"state_name":"Indiana","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner appointment and powers","Indiana Life and Health Insurance Guaranty Association","Producer licensing types and maintenance","Producer/company compliance and unfair practices (twisting, rebating, misrepresentation)"],"outline_url":"https://www.pearsonvue.com/us/en/in/insurance.html"},
+  "IA": {"state_name":"Iowa","vendor":"Pearson VUE","pc_exam":{"general":100,"state":27,"total_scored":127,"passing_score":70},"lh_exam":{"general":100,"state":27,"total_scored":127,"passing_score":70},"state_topics":["Commissioner of Insurance powers","Licensing and appointments","Unfair and deceptive practices (Iowa Insurance Fraud Act)","Iowa Life and Health Insurance Guaranty Association","Life-specific: replacement, group life, viatical settlements, suitability"],"outline_url":"https://www.pearsonvue.com/us/en/ia/insurance.html"},
+  "KS": {"state_name":"Kansas","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner of Insurance (elected)","Licensing and appointments","Unfair/deceptive practices (rebating, misrepresentation, twisting)","Kansas Life and Health Insurance Guaranty Association","Life-specific: replacement, standard provisions, annuity suitability, viatical settlements"],"outline_url":"https://www.pearsonvue.com/us/en/ks/insurance.html"},
+  "KY": {"state_name":"Kentucky","vendor":"Kentucky DOI (self-administered)","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Kentucky Insurance Code scope and definitions","Agent licensing requirements (KRS 304.9-080 to 120)","Change of address and license renewal","Record retention requirements","Kentucky Insurance Guaranty Association"],"outline_url":"https://insurance.ky.gov"},
+  "LA": {"state_name":"Louisiana","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":50,"state":30,"total_scored":80,"passing_score":70},"state_topics":["Licensing types and maintenance","Disciplinary actions and penalties","Commissioner duties and company regulation","Marketing practices: controlled business, advertising, replacement, illustrations","Unfair trade practices (misrepresentation, rebating, defamation, discrimination)","Insurance Fraud Act and privacy"],"outline_url":"https://www.psiexams.com"},
+  "ME": {"state_name":"Maine","vendor":"Pearson VUE","pc_exam":{"general":100,"state":20,"total_scored":120,"passing_score":70},"lh_exam":{"general":50,"state":20,"total_scored":70,"passing_score":70},"state_topics":["Superintendent of Insurance powers","Definitions and Guaranty Association","Licensing types and limitations","Marketing practices (unfair claims, rebating, twisting, misrepresentation)","Producer responsibilities and privacy","Life-specific: solicitation, AIDS rules, standard provisions, viatical settlements, replacement"],"outline_url":"https://www.pearsonvue.com/us/en/me/insurance.html"},
+  "MD": {"state_name":"Maryland","vendor":"Prometric","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"state_topics":["License renewal and continuing education (24 hrs per cycle including 3 hrs ethics)","Commissioner authority and definitions","Licensing and appointments","Market conduct and consumer protection (rebating, misrepresentation, twisting)","Maryland Life and Health Insurance Guaranty Association"],"outline_url":"https://www.prometric.com/exams/mia/"},
+  "MA": {"state_name":"Massachusetts","vendor":"Prometric (transitioning to Pearson VUE July 22 2026)","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":50,"state":25,"total_scored":75,"passing_score":70},"state_topics":["Licensing process and types of licensees","Disciplinary actions","Commissioner duties and company regulation","Unfair Insurance Practices Act (misrepresentation, false advertising, defamation, rebating)","Insurance Fraud and Privacy Protection Act"],"outline_url":"https://www.prometric.com/exams/insurance-ma/"},
+  "MI": {"state_name":"Michigan","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":50,"state":30,"total_scored":80,"passing_score":70},"state_topics":["Company regulation and producer appointments","Types of licensees and license maintenance","Unfair insurance trade practices","Life-specific: advertising, Michigan Life and Health Insurance Guaranty Association, replacement, illustrations"],"outline_url":"https://www.psiexams.com"},
+  "MN": {"state_name":"Minnesota","vendor":"Pearson VUE","pc_exam":{"general":100,"state":20,"total_scored":120,"passing_score":70},"lh_exam":{"general":100,"state":20,"total_scored":120,"passing_score":70},"state_topics":["Commissioner powers and definitions","Licensing and appointments","Trade practices and marketing standards (rebating, twisting, churning, misrepresentation)","P&C specific: Standard Fire Policy, FAIR Plan, no-fault auto, Minnesota Auto Insurance Plan, workers compensation"],"outline_url":"https://www.pearsonvue.com/us/en/mn/insurance.html"},
+  "MS": {"state_name":"Mississippi","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner powers and definitions","Licensing and appointments","Market conduct and unfair practices (rebating, twisting, misrepresentation, fraud)","Mississippi Life and Health Insurance Guaranty Association","Replacement and disclosure"],"outline_url":"https://www.pearsonvue.com/us/en/ms/insurance.html"},
+  "MO": {"state_name":"Missouri","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Director of Commerce and Insurance powers","Licensing requirements and maintenance","Unfair/deceptive practices (rebating, misrepresentation, defamation)","Missouri Property and Casualty and Life and Health Guaranty Associations","Life-specific: replacement, variable products, group insurance, suitability/best-interest standard"],"outline_url":"https://www.pearsonvue.com/us/en/mo/insurance.html"},
+  "MT": {"state_name":"Montana","vendor":"Pearson VUE","pc_exam":{"general":100,"state":24,"total_scored":124,"passing_score":70},"lh_exam":{"general":100,"state":24,"total_scored":124,"passing_score":70},"state_topics":["Commissioner powers and definitions","Licensing requirements","Unfair trade practices (false advertising, rebating, twisting, misrepresentation)","Licensee responsibilities and privacy (Life and Health Guaranty Association, Insurance Fraud Protection Act)","Life-specific: replacement, group life, annuity suitability, viatical settlements, credit life, variable products"],"outline_url":"https://www.pearsonvue.com/us/en/mt/insurance.html"},
+  "NE": {"state_name":"Nebraska","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Licensing issuance and maintenance","Types of licenses and exemptions","State regulation of producers and insurers (fiduciary duties, commissions, recordkeeping)","Unfair trade practices (rebating, twisting, misrepresentation, STOLI/IOLI, commingling)","Insurance Fraud Act and privacy (FCRA, CAN-SPAM)"],"outline_url":"https://www.psiexams.com"},
+  "NV": {"state_name":"Nevada","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner and definitions","Licensing and appointments (including prepaid funeral contract agents, reinsurance intermediaries)","Marketing practices and fiduciary duties","Nevada Life and Health Insurance Guaranty Association","Life-specific: credit life, group life, advertising, replacement, viatical settlements"],"outline_url":"https://www.pearsonvue.com/us/en/nv/insurance.html"},
+  "NH": {"state_name":"New Hampshire","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":50,"state":30,"total_scored":80,"passing_score":70},"state_topics":["Licensing process and types","State regulation and Commissioner powers","Producer obligations and unfair practices (misrepresentation, rebating, discrimination, fraud)","Auto-insurance statutes (collision deductible waivers, cancellation/non-renewal)","NFIP flood insurance","Federal laws (FCRA, 18 USC 1033/1034)"],"outline_url":"https://www.psiexams.com"},
+  "NJ": {"state_name":"New Jersey","vendor":"PSI","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":50,"state":25,"total_scored":75,"passing_score":70},"state_topics":["Regulatory jurisdiction and Commissioner powers (Paul v. Virginia, McCarran-Ferguson)","Definitions and types of insurers","Licensing and contractual relationships","Trade practices and licensee responsibilities (Fraud Prevention Act, privacy)","New Jersey Life and Health Insurance Guaranty Association","Life-specific: credit life, group life, replacement, suitability"],"outline_url":"https://www.psiexams.com"},
+  "NM": {"state_name":"New Mexico","vendor":"Prometric","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"state_topics":["Licensing process and types","State regulation and Superintendent powers","Unfair trade practices (misrepresentation, twisting, defamation, rebating, fraud)","Federal regulation (FCRA, federal fraud statute)","Consumer Information Privacy Act"],"outline_url":"https://www.prometric.com/newmexico-insurance"},
+  "NY": {"state_name":"New York","vendor":"PSI","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"state_topics":["Agent appointments and termination","Unfair and prohibited practices (misrepresentation, defamation, rebating)","Licensee regulation (controlled business, commissions, trust accounts, compensation disclosure)","Examination of books and records","Fraud and privacy (Insurance Frauds Prevention Act, FCRA, 18 USC 1033)","NY-specific: Valued Policy Law, Regulation 60 (replacement), Regulation 187 (best interest), NY FAIR Plan, no-fault auto"],"outline_url":"https://www.psiexams.com"},
+  "NC": {"state_name":"North Carolina","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Contract of insurance and definitions","Commissioner of Insurance powers","Licensing of intermediaries and continuing education","Privacy: Insurance Information and Privacy Protection Act","Unfair Trade Practices Act (Article 63)","Solicitation rules, replacement regulations, ethical standards","NC Life and Health Insurance Guaranty Association"],"outline_url":"https://www.pearsonvue.com/us/en/nc/insurance.html"},
+  "ND": {"state_name":"North Dakota","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":50,"state":30,"total_scored":80,"passing_score":70},"state_topics":["Licensing and appointments","State regulation and producer obligations","Unfair trade practices and insurance fraud","A&H policy provisions and mandated benefits (newborns, dependents, portability, prescriptions, chiropractic)","North Dakota Life and Health Guaranty Association"],"outline_url":"https://www.psiexams.com"},
+  "OH": {"state_name":"Ohio","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Director of Insurance powers and company regulation","Agent licensing and appointments","Unfair trade practices and market conduct","Ohio-specific: Valued Policy Law, Ohio Insurance Guaranty Association, mine-subsidence coverage, workers compensation monopoly","Federal laws (FCRA, 18 USC 1033)"],"outline_url":"https://www.psiexams.com"},
+  "OK": {"state_name":"Oklahoma","vendor":"PSI","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"state_topics":["Commissioner powers and definitions","Licensing and compensation rules","P&C adjuster topics: Oklahoma Insurance Guaranty Association, cancellation/non-renewal, surplus lines, unfair claims settlement"],"outline_url":"https://www.psiexams.com"},
+  "OR": {"state_name":"Oregon","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Licensing requirements and maintenance","Regulator powers and appointments","Market conduct and unfair practices (rebating, misrepresentation, defamation, fraud)","Oregon Insurance Guaranty Association, Oregon FAIR Plan","Insurance Fraud Prevention Act and privacy"],"outline_url":"https://www.pearsonvue.com/us/en/or/insurance.html"},
+  "PA": {"state_name":"Pennsylvania","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":50,"state":30,"total_scored":80,"passing_score":70},"state_topics":["Licensing process and types","Regulatory authority and company regulation","Producer regulation and market conduct (rebating, twisting, misrepresentation, fraud)","Privacy and fraud (FCRA, GLBA, Insurance Fraud Regulation)","PA-specific: MVFRL (Motor Vehicle Financial Responsibility Law)"],"outline_url":"https://www.psiexams.com"},
+  "RI": {"state_name":"Rhode Island","vendor":"Pearson VUE","pc_exam":{"general":100,"state":40,"total_scored":140,"passing_score":70},"lh_exam":{"general":100,"state":40,"total_scored":140,"passing_score":70},"state_topics":["Commissioner authority and definitions","Licensing and appointments","Market conduct and unfair practices (rebating, twisting, misrepresentation, fraud)","Rhode Island Life and Health Insurance Guaranty Association","Life-specific: replacement, AIDS/HIV testing, suitability, group life provisions"],"outline_url":"https://www.pearsonvue.com/us/en/ri/insurance.html"},
+  "SC": {"state_name":"South Carolina","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Director powers and definitions","Licensing and appointments","Unfair trade practices (rebating, twisting, misrepresentation, fraud, churning)","South Carolina Life and Accident and Health Insurance Guaranty Association","Life-specific: replacement, advertising, group life provisions"],"outline_url":"https://www.pearsonvue.com/us/en/sc/insurance.html"},
+  "SD": {"state_name":"South Dakota","vendor":"Pearson VUE","pc_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"lh_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"state_topics":["Director powers and definitions","Licensing requirements and maintenance","Producer responsibilities and market conduct (rebating, twisting, misrepresentation, commingling, misappropriation)","Policy delivery and life-specific provisions (replacement, standard provisions, group life, viatical settlements)"],"outline_url":"https://www.pearsonvue.com/us/en/sd/insurance.html"},
+  "TN": {"state_name":"Tennessee","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner powers and definitions","Licensing and appointments","Unfair trade and claims practices (false advertising, rebating, misrepresentation, fraud)","Tennessee Life and Health Insurance Guaranty Association","Life-specific: policy provisions, disclosures, replacement, annuity suitability"],"outline_url":"https://www.pearsonvue.com/us/en/tn/insurance.html"},
+  "TX": {"state_name":"Texas","vendor":"Pearson VUE","pc_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"life_only_exam":{"general":50,"state":30,"total_scored":80,"passing_score":70},"state_topics":["Commissioner powers (examinations, investigations, hearings, penalties, cease-and-desist)","Definitions (transacting insurance, domestic/foreign/alien, stock/mutual/fraternal)","Licensing (agent/agency, temporary, exemptions, appointments, CE, records, denial/renewal/suspension)","Marketing practices (unfair claims, false advertising, misrepresentation, defamation, rebating, fraud, commingling)","Texas Life and Health Guaranty Association","TX-specific: Texas Windstorm Insurance Association (TWIA)","TX-specific: Transportation network company coverage"],"outline_url":"https://www.pearsonvue.com/content/dam/VUE/vue/en/documents/publications/124401.pdf"},
+  "UT": {"state_name":"Utah","vendor":"Prometric","pc_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"lh_exam":{"general":100,"state":25,"total_scored":125,"passing_score":70},"state_topics":["Commissioner powers and licensing","Adjuster licensing qualifications and exemptions","Disciplinary actions and unfair claims laws","Federal fraud statutes (18 USC 1033-1034)"],"outline_url":"https://www.prometric.com/utah-insurance"},
+  "VT": {"state_name":"Vermont","vendor":"Prometric","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Licensing process and maintenance","State regulation and Commissioner powers","Unfair trade practices (misrepresentation, rebating, defamation, discrimination, suitability)","Federal laws (FCRA, 18 USC 1033)","Vermont FAIR Plan","Vermont Life and Health Insurance Guaranty Association"],"outline_url":"https://www.prometric.com/exams/insurance-vt/"},
+  "VA": {"state_name":"Virginia","vendor":"Prometric","pc_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"lh_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"state_topics":["Licensing and maintenance (agents, consultants, non-residents, business entities, viatical settlement brokers)","Disciplinary actions and Commission powers","Agent responsibilities and unfair practices (misrepresentation, rebating, twisting, improper referrals)","Privacy and information practices","Virginia Life Accident and Sickness Insurance Guaranty Association"],"outline_url":"https://www.prometric.com/exams/insurance-va/"},
+  "WA": {"state_name":"Washington","vendor":"PSI","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner authority and definitions","Licensing and appointments","Marketing practices (rebating, twisting, misrepresentation, defamation, discrimination)","Disclosure of compensation","Replacement and life-specific rules (illustrations, annuity suitability, policy clauses)","Washington Life and Disability Insurance Guaranty Association"],"outline_url":"https://www.psiexams.com"},
+  "WV": {"state_name":"West Virginia","vendor":"Pearson VUE","pc_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"lh_exam":{"general":100,"state":30,"total_scored":130,"passing_score":70},"state_topics":["Commissioner authority","Definitions and licensing types","Unfair trade practices (rebating, misrepresentation, defamation, fraud)","West Virginia Life and Health Insurance Guaranty Association","Replacement, disclosure, and annuity suitability"],"outline_url":"https://www.pearsonvue.com/us/en/wv/insurance.html"},
+  "WI": {"state_name":"Wisconsin","vendor":"Prometric","pc_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"lh_exam":{"general":50,"state":35,"total_scored":85,"passing_score":70},"state_topics":["Licensing purpose, requirements and maintenance","State regulation and Wisconsin Insurance Security Fund","Producer regulation and marketing practices (rebating, twisting, misrepresentation, defamation)","Company regulation and unfair claims practices","Examination of records and producer-conduct rules"],"outline_url":"https://www.prometric.com/wisconsin-insurance"},
+  "WY": {"state_name":"Wyoming","vendor":"Pearson VUE","pc_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"lh_exam":{"general":100,"state":35,"total_scored":135,"passing_score":70},"state_topics":["Commissioner appointment and powers","Definitions and licensing types","License maintenance (CE, change of address, renewal, termination)","Producer responsibilities and marketing conduct (rebating, twisting, misrepresentation, fraud)","Wyoming Insurance Guaranty Association and consumer privacy","Wyoming FAIR Plan"],"outline_url":"https://www.pearsonvue.com/us/en/wy/insurance.html"},
+}
+
+_STATE_NAMES: dict[str, str] = {k: v["state_name"] for k, v in STATE_EXAM_INFO.items()}
 
 
 @asynccontextmanager
@@ -62,20 +109,24 @@ async def lifespan(app: FastAPI):
     create_all()
     db = SessionLocal()
     try:
+        for stmt in [
+            "ALTER TABLE users ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
+            "ALTER TABLE users ADD COLUMN state VARCHAR(2)",
+            "ALTER TABLE modules ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
+        ]:
+            try:
+                db.execute(text(stmt))
+                db.commit()
+            except Exception:
+                db.rollback()
         seed_course_if_empty(db)
     finally:
         db.close()
-    if settings.enable_dev_login and "localhost" not in settings.app_base_url:
-        warnings.warn("WARNING: ENABLE_DEV_LOGIN=true on a non-localhost URL. Disable before launch!")
     yield
 
 
-_docs_url = "/docs" if settings.enable_dev_login else None
-_redoc_url = "/redoc" if settings.enable_dev_login else None
-app = FastAPI(title="P&C License Prep Academy API", version="2.1.0", lifespan=lifespan,
-              docs_url=_docs_url, redoc_url=_redoc_url)
-
-origins = settings.cors_origin_list if settings.enable_dev_login else [settings.app_base_url]
+app = FastAPI(title="P&C License Prep Academy API", version="2.1.0", lifespan=lifespan)
+origins = settings.cors_origin_list
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -84,18 +135,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax", https_only=settings.app_base_url.startswith("https"))
-
-
-@app.middleware("http")
-async def security_headers(request: Request, call_next: Any) -> Any:
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    if not settings.enable_dev_login:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    return response
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -169,7 +208,7 @@ def health(db: Session = Depends(get_db)):
         "questions": db.scalar(select(func.count()).select_from(Question)),
         "providers": configured_providers(),
         "free_public_access": True,
-        "coverage_coach_mode": settings.tutor_mode,
+        "coverage_coach_mode": "openai" if settings.openai_api_key else "fallback",
     }
 
 
@@ -204,13 +243,54 @@ def me(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get("user_id")
     if not user_id:
         return {"user": None}
-    user = db.get(__import__("app.models", fromlist=["User"]).User, int(user_id))
-    return {"user": public_user(user) if user else None}
+    user = db.get(User, int(user_id))
+    if not user:
+        return {"user": None}
+    base = public_user(user)
+    course = getattr(user, "course", "pc") or "pc"
+    state = getattr(user, "state", None)
+    state_name = STATE_EXAM_INFO.get(state or "", {}).get("state_name") if state else None
+    return {"user": {**base, "course": course, "state": state, "state_name": state_name}}
+
+
+@app.post("/api/me/course")
+def set_course(payload: CourseIn, request: Request, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    user.course = payload.course
+    db.commit()
+    return {"ok": True, "course": user.course}
+
+
+@app.post("/api/me/state")
+def set_state(payload: StateIn, request: Request, db: Session = Depends(get_db)):
+    if payload.state not in STATE_EXAM_INFO:
+        raise HTTPException(status_code=422, detail=f"Unknown state abbreviation: {payload.state}")
+    user = require_user(request, db)
+    user.state = payload.state
+    db.commit()
+    return {"ok": True, "state": user.state, "state_name": _STATE_NAMES[user.state]}
+
+
+@app.get("/api/state-info/{state_abbr}")
+def state_info(state_abbr: str):
+    abbr = state_abbr.upper()
+    if abbr not in STATE_EXAM_INFO:
+        raise HTTPException(status_code=404, detail="State not found")
+    info = STATE_EXAM_INFO[abbr]
+    return {"state": abbr, **info}
 
 
 @app.get("/api/modules")
-def list_modules(db: Session = Depends(get_db)):
-    modules = db.scalars(select(Module).options(selectinload(Module.lessons)).where(Module.is_active == True).order_by(Module.sort_order, Module.id)).all()
+def list_modules(request: Request, course: str | None = Query(None), db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not course and user_id:
+        u = db.get(User, int(user_id))
+        course = getattr(u, "course", "pc") if u else "pc"
+    stmt = select(Module).options(selectinload(Module.lessons)).where(Module.is_active == True)
+    if course:
+        stmt = stmt.where(Module.course == course)
+    stmt = stmt.order_by(Module.sort_order, Module.id)
+    modules = db.scalars(stmt).all()
     return [module_out(m) for m in modules]
 
 
@@ -270,7 +350,6 @@ def list_questions(module_slug: str | None = None, limit: int = Query(10, ge=1, 
 @app.post("/api/quiz/submit")
 def submit_quiz(payload: QuizSubmitIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
-    rate_limit(f"quiz:{user.id}", 20, 60)
     if len(payload.answers) > 50:
         raise HTTPException(status_code=400, detail="Submit 50 answers or fewer at a time")
 
@@ -362,7 +441,6 @@ def mistake_bank(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/tutor/ask")
 def tutor_ask(payload: TutorAskIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
-    rate_limit(f"tutor:{user.id}", 10, 60)
     return ask_coverage_coach(db, user, payload.message)
 
 
@@ -371,9 +449,15 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     """Aggregated progress data for the dashboard view."""
     user = require_user(request, db)
 
+    course = user.course or "pc"
+
     # ── Lesson completion ────────────────────────────────────────────
     total_lessons = (
-        db.scalar(select(func.count()).select_from(Lesson).where(Lesson.is_active == True)) or 0
+        db.scalar(
+            select(func.count()).select_from(Lesson)
+            .join(Module, Module.id == Lesson.module_id)
+            .where(Lesson.is_active == True, Module.course == course)
+        ) or 0
     )
     progress_rows = db.scalars(
         select(LessonProgress).where(LessonProgress.user_id == user.id)
@@ -383,7 +467,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     # ── Module breakdown + recommendations ──────────────────────────
     modules = db.scalars(
         select(Module)
-        .where(Module.is_active == True)
+        .where(Module.is_active == True, Module.course == course)
         .options(selectinload(Module.lessons))
         .order_by(Module.sort_order)
     ).all()
@@ -482,660 +566,3 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "modules": module_stats,
         "recommendations": recommendations,
     }
-
-
-@app.get("/api/study-plan/summary")
-def study_plan_summary(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Lightweight plan summary — no Ollama, returns top-2 plan steps in <100ms."""
-    user = require_user(request, db)
-    data = _compute_study_plan(user, db)
-    return {"summary": data["summary"], "plan": data["plan"][:2]}
-
-
-@app.get("/api/study-plan")
-def study_plan(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    user = require_user(request, db)
-    data = _compute_study_plan(user, db)
-    summary = data["summary"]
-    plan = data["plan"]
-    weak_areas = data["weak_areas"]
-    strengths = data["strengths"]
-    tested = data["tested"]
-    review_due = summary["review_items_due"]
-
-    # ── Ollama narrative ─────────────────────────────────────────────
-    narrative_prompt = (
-        f"Student summary: {summary['modules_mastered']} of {summary['modules_total']} modules mastered, "
-        f"overall quiz average {summary['overall_readiness']}%, "
-        f"{review_due} mistake-bank items due for review. "
-        + (f"Weak areas: {', '.join(s['title'] for s in weak_areas[:3])}. " if weak_areas else "No weak areas yet. ")
-        + (f"Strengths: {', '.join(s['title'] for s in strengths[:3])}. " if strengths else "")
-        + "Write a 100-120 word personalised, encouraging study plan narrative in second person. "
-        "Be specific about what they should focus on next. No bullet points, just flowing prose."
-    )
-    raw_narrative = call_ollama_raw(
-        "You are Coverage Coach, a supportive P&C insurance licensing study tutor.",
-        narrative_prompt,
-    )
-    if not raw_narrative:
-        if not tested:
-            raw_narrative = (
-                "Welcome to your personalized study plan! Since you're just getting started, "
-                "your first priority is to work through the foundation modules. Open each module, "
-                "read through the lessons at your own pace, and take the practice quiz when you "
-                "feel ready. The study plan will adapt as you build your progress — your next check-in "
-                "will show your weak spots, spaced-repetition reviews, and confidence gaps. "
-                "You've got this — every expert started exactly where you are now."
-            )
-        else:
-            weak_titles = ", ".join(s["title"] for s in weak_areas[:2]) if weak_areas else "all areas"
-            raw_narrative = (
-                f"Great progress so far! Focus your energy on {weak_titles} where your quiz scores "
-                "show room for improvement. Work through the lessons again, pay close attention to the "
-                "glossary terms, and re-quiz until you hit 80%. Don't forget to clear your spaced-repetition "
-                f"review queue — you have {review_due} items waiting. Once those are solid, revisit the "
-                "modules where your confidence is high but accuracy is low to make sure your instincts "
-                "match the exam material. Keep the momentum going!"
-            )
-
-    return {
-        "summary": summary,
-        "narrative": raw_narrative,
-        "plan": plan[:8],
-        "weak_areas": [{"slug": s["slug"], "title": s["title"], "accuracy": s["accuracy"]} for s in weak_areas[:5]],
-        "strengths": [{"slug": s["slug"], "title": s["title"], "accuracy": s["accuracy"]} for s in strengths[:5]],
-    }
-
-
-def _compute_study_plan(user: Any, db: Session) -> dict[str, Any]:
-    """Shared computation for both summary and full study-plan endpoints."""
-    all_modules = db.scalars(select(Module).where(Module.is_active == True).order_by(Module.sort_order)).all()  # noqa: E712
-
-    module_accuracy: dict[int, dict[str, Any]] = {}
-    for mod in all_modules:
-        total_ans = db.scalar(
-            select(func.count()).select_from(QuizAnswer)
-            .join(Question, QuizAnswer.question_id == Question.id)
-            .join(QuizAttempt, QuizAnswer.attempt_id == QuizAttempt.id)
-            .where(QuizAttempt.user_id == user.id, Question.module_id == mod.id)
-        ) or 0
-        correct_ans = db.scalar(
-            select(func.count()).select_from(QuizAnswer)
-            .join(Question, QuizAnswer.question_id == Question.id)
-            .join(QuizAttempt, QuizAnswer.attempt_id == QuizAttempt.id)
-            .where(QuizAttempt.user_id == user.id, Question.module_id == mod.id, QuizAnswer.is_correct == True)  # noqa: E712
-        ) or 0
-        accuracy = round(correct_ans / total_ans * 100) if total_ans else None
-
-        lessons = db.scalars(
-            select(Lesson).where(Lesson.module_id == mod.id, Lesson.is_active == True)  # noqa: E712
-        ).all()
-        lesson_ids = [l.id for l in lessons]
-        progress_rows = db.scalars(
-            select(LessonProgress).where(
-                LessonProgress.user_id == user.id,
-                LessonProgress.lesson_id.in_(lesson_ids),
-            )
-        ).all() if lesson_ids else []
-        completed = [p for p in progress_rows if p.completed]
-        confidences = [p.confidence for p in progress_rows if p.confidence]
-        avg_conf = round(sum(confidences) / len(confidences), 1) if confidences else None
-        lesson_pct = round(len(completed) / len(lesson_ids) * 100) if lesson_ids else 0
-
-        module_accuracy[mod.id] = {
-            "id": mod.id,
-            "slug": mod.slug,
-            "title": mod.title,
-            "accuracy": accuracy,
-            "total_answers": total_ans,
-            "lesson_pct": lesson_pct,
-            "avg_confidence": avg_conf,
-            "total_lessons": len(lesson_ids),
-            "completed_lessons": len(completed),
-        }
-
-    # Incorporate diagnostic results for untested modules
-    diag = db.scalar(select(DiagnosticResult).where(DiagnosticResult.user_id == user.id))
-    diag_scores: dict[str, int] = json.loads(diag.module_scores or "{}") if diag else {}
-    for mod in all_modules:
-        stat = module_accuracy[mod.id]
-        if stat["accuracy"] is None and mod.slug in diag_scores:
-            # Synthetic accuracy: 100% if correct in diagnostic, 30% if wrong (weak signal)
-            stat["accuracy"] = 100 if diag_scores[mod.slug] == 1 else 30
-            stat["_from_diagnostic"] = True
-
-    due_mistakes = db.scalars(
-        select(MistakeBank)
-        .options(selectinload(MistakeBank.question))
-        .where(MistakeBank.user_id == user.id, MistakeBank.mastered_at == None)  # noqa: E711
-        .order_by(MistakeBank.last_missed_at.asc())
-        .limit(8)
-    ).all()
-
-    stats = list(module_accuracy.values())
-    tested = [s for s in stats if s["accuracy"] is not None]
-    untested = [s for s in stats if s["accuracy"] is None and s["lesson_pct"] < 100]
-
-    weak_areas: list[dict[str, Any]] = []
-    strengths: list[dict[str, Any]] = []
-    for s in tested:
-        if s["accuracy"] < 65:
-            weak_areas.append(s)
-        elif s["accuracy"] >= 80 and s["lesson_pct"] == 100:
-            strengths.append(s)
-
-    conf_gap = [
-        s for s in tested
-        if s["avg_confidence"] is not None and s["avg_confidence"] >= 2.5 and s["accuracy"] < 70
-    ]
-
-    plan: list[dict[str, Any]] = []
-
-    reviewed_module_ids: set[int] = set()
-    for mb in due_mistakes[:3]:
-        if mb.question and mb.question.module_id not in reviewed_module_ids:
-            mod_stat = module_accuracy.get(mb.question.module_id)
-            if mod_stat:
-                plan.append({
-                    "type": "spaced_review",
-                    "module_slug": mod_stat["slug"],
-                    "module_title": mod_stat["title"],
-                    "reason": f"You've missed questions here {mb.times_missed}x — spaced repetition review is due.",
-                    "action_label": "Review Mistakes",
-                })
-                reviewed_module_ids.add(mb.question.module_id)
-
-    for s in sorted(weak_areas, key=lambda x: x["accuracy"])[:3]:
-        if not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "weak_module",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": f"Quiz accuracy is {s['accuracy']}% — needs focused practice.",
-                "action_label": "Study & Quiz",
-            })
-
-    for s in conf_gap[:2]:
-        if not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "confidence_gap",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": f"You feel confident ({s['avg_confidence']}/3) but quiz accuracy is only {s['accuracy']}% — review to solidify.",
-                "action_label": "Solidify Knowledge",
-            })
-
-    for s in sorted(untested, key=lambda x: x["total_lessons"])[:3]:
-        if not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "start_here",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": "You haven't studied this module yet — start here to build your foundation.",
-                "action_label": "Start Module",
-            })
-
-    for s in stats:
-        if 80 <= s["lesson_pct"] < 100 and not any(p["module_slug"] == s["slug"] for p in plan):
-            plan.append({
-                "type": "finish_module",
-                "module_slug": s["slug"],
-                "module_title": s["title"],
-                "reason": f"You've completed {s['lesson_pct']}% of lessons — finish the module to lock in mastery.",
-                "action_label": "Finish Module",
-            })
-
-    mastered = [s for s in stats if s["lesson_pct"] == 100 and (s["accuracy"] or 0) >= 75]
-    review_due = len(due_mistakes)
-    overall_readiness = round(
-        db.scalar(select(func.avg(QuizAttempt.score)).where(QuizAttempt.user_id == user.id)) or 0
-    )
-
-    return {
-        "summary": {
-            "overall_readiness": overall_readiness,
-            "modules_mastered": len(mastered),
-            "modules_total": len(all_modules),
-            "review_items_due": review_due,
-        },
-        "plan": plan[:8],
-        "weak_areas": weak_areas,
-        "strengths": strengths,
-        "tested": tested,
-    }
-
-
-# ── Diagnostic placement quiz ─────────────────────────────────────────────────
-
-DIAGNOSTIC_MODULES = [
-    "insurance-basics",
-    "property-fundamentals",
-    "casualty-fundamentals",
-    "personal-auto",
-    "homeowners",
-]
-
-
-def _format_question_with_module(q: Question) -> dict[str, Any]:
-    return {
-        "id": q.id,
-        "question_text": q.question_text,
-        "question_type": q.question_type,
-        "difficulty": q.difficulty,
-        "module_slug": q.module.slug if q.module else "",
-        "module_title": q.module.title if q.module else "",
-        "choices": [
-            {"id": c.id, "choice_text": c.choice_text, "sort_order": c.sort_order}
-            for c in sorted(q.choices, key=lambda c: c.sort_order)
-        ],
-    }
-
-
-@app.get("/api/diagnostic/questions")
-def diagnostic_questions(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    for slug in DIAGNOSTIC_MODULES:
-        mod = db.scalar(select(Module).where(Module.slug == slug, Module.is_active == True))  # noqa: E712
-        if not mod:
-            continue
-        questions = db.scalars(
-            select(Question)
-            .options(selectinload(Question.choices), selectinload(Question.module))
-            .where(Question.module_id == mod.id, Question.is_active == True)  # noqa: E712
-        ).all()
-        if questions:
-            result.append(_format_question_with_module(random.choice(questions)))
-    return result
-
-
-@app.post("/api/diagnostic/submit")
-def diagnostic_submit(
-    body: DiagnosticSubmitIn,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    user = require_user(request, db)
-
-    # One diagnostic per user — idempotent upsert
-    existing = db.scalar(select(DiagnosticResult).where(DiagnosticResult.user_id == user.id))
-
-    module_scores: dict[str, int] = {}
-    score = 0
-    for q_id, choice_id in body.answers.items():
-        q = db.scalar(
-            select(Question)
-            .options(selectinload(Question.choices), selectinload(Question.module))
-            .where(Question.id == int(q_id))
-        )
-        if not q:
-            continue
-        correct_choice = next((c for c in q.choices if c.is_correct), None)
-        is_correct = correct_choice is not None and correct_choice.id == int(choice_id)
-        if q.module:
-            module_scores[q.module.slug] = 1 if is_correct else 0
-        if is_correct:
-            score += 1
-
-    if existing:
-        existing.score = score
-        existing.module_scores = json.dumps(module_scores)
-        from datetime import datetime, timezone
-        existing.completed_at = datetime.now(timezone.utc)
-    else:
-        db.add(DiagnosticResult(
-            user_id=user.id,
-            score=score,
-            module_scores=json.dumps(module_scores),
-        ))
-    db.commit()
-
-    return {
-        "score": score,
-        "total": len(DIAGNOSTIC_MODULES),
-        "module_scores": module_scores,
-        "already_had_diagnostic": existing is not None,
-    }
-
-
-@app.get("/api/diagnostic/status")
-def diagnostic_status(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    user = require_user(request, db)
-    result = db.scalar(select(DiagnosticResult).where(DiagnosticResult.user_id == user.id))
-    if not result:
-        return {"completed": False, "score": None, "module_scores": None}
-    return {
-        "completed": True,
-        "score": result.score,
-        "module_scores": json.loads(result.module_scores or "{}"),
-    }
-
-
-# ── Flashcards ────────────────────────────────────────────────────────────────
-
-def _sm2(ease: float, interval: float, rating: int) -> tuple[float, float]:
-    if rating == 1:
-        return 1.3, 1.0
-    elif rating == 2:
-        return max(1.3, ease - 0.15), max(1.0, interval * 1.2)
-    elif rating == 3:
-        return ease, interval * ease
-    else:
-        return min(4.0, ease + 0.15), interval * min(4.0, ease + 0.15) * 1.3
-
-
-def _term_to_card(term: Term, progress: FlashcardProgress | None, now: datetime) -> dict[str, Any]:
-    due = progress is None or progress.next_review <= now
-    return {
-        "id": term.id,
-        "term": term.term,
-        "definition": term.exam_definition or term.plain_english_definition or "",
-        "example": term.example or "",
-        "module_title": term.module.title if term.module else "",
-        "module_slug": term.module.slug if term.module else "",
-        "due": due,
-        "interval_days": round(progress.interval_days, 2) if progress else 1.0,
-        "ease": round(progress.ease, 2) if progress else 2.5,
-        "review_count": progress.review_count if progress else 0,
-    }
-
-
-@app.get("/api/flashcards")
-def get_flashcards(
-    module_slug: str | None = None,
-    request: Request = None,
-    db: Session = Depends(get_db),
-) -> list[dict[str, Any]]:
-    user = require_user(request, db)
-    now = datetime.now(timezone.utc)
-
-    q = select(Term).options(selectinload(Term.module))
-    if module_slug:
-        mod = db.scalar(select(Module).where(Module.slug == module_slug))
-        if mod:
-            q = q.where(Term.module_id == mod.id)
-    terms = db.scalars(q).all()
-
-    progress_map: dict[int, FlashcardProgress] = {
-        p.term_id: p
-        for p in db.scalars(
-            select(FlashcardProgress).where(FlashcardProgress.user_id == user.id)
-        ).all()
-    }
-
-    cards = [_term_to_card(t, progress_map.get(t.id), now) for t in terms]
-    # Due cards first, then new/not-due — both groups shuffled
-    due = [c for c in cards if c["due"]]
-    not_due = [c for c in cards if not c["due"]]
-    random.shuffle(due)
-    random.shuffle(not_due)
-    return due + not_due
-
-
-@app.post("/api/flashcards/{term_id}/review")
-def review_flashcard(
-    term_id: int,
-    payload: FlashcardReviewIn,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    user = require_user(request, db)
-    now = datetime.now(timezone.utc)
-
-    term = db.scalar(select(Term).where(Term.id == term_id))
-    if not term:
-        raise HTTPException(status_code=404, detail="Term not found")
-
-    progress = db.scalar(
-        select(FlashcardProgress).where(
-            FlashcardProgress.user_id == user.id,
-            FlashcardProgress.term_id == term_id,
-        )
-    )
-    if not progress:
-        progress = FlashcardProgress(user_id=user.id, term_id=term_id)
-        db.add(progress)
-
-    new_ease, new_interval = _sm2(progress.ease, progress.interval_days, payload.rating)
-    progress.ease = new_ease
-    progress.interval_days = new_interval
-    progress.review_count = (progress.review_count or 0) + 1
-    progress.last_reviewed = now
-    progress.next_review = now + timedelta(days=new_interval)
-    db.commit()
-    db.refresh(progress)
-
-    return {
-        "term_id": term_id,
-        "ease": round(progress.ease, 2),
-        "interval_days": round(progress.interval_days, 2),
-        "review_count": progress.review_count,
-        "next_review": progress.next_review.isoformat(),
-    }
-
-
-# ── Exam Session ──────────────────────────────────────────────────────────────
-
-@app.get("/api/exam/start")
-def exam_start(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    user = require_user(request, db)
-
-    all_modules = db.scalars(select(Module).where(Module.is_active == True)).all()
-    questions_per_module: dict[int, list[Question]] = {}
-    for mod in all_modules:
-        qs = db.scalars(
-            select(Question)
-            .options(selectinload(Question.choices), selectinload(Question.module))
-            .where(Question.module_id == mod.id)
-        ).all()
-        if qs:
-            questions_per_module[mod.id] = list(qs)
-
-    # Proportional allocation up to 50 questions
-    total_available = sum(len(v) for v in questions_per_module.values())
-    target = min(50, total_available)
-    selected: list[Question] = []
-    if questions_per_module:
-        base = max(1, target // len(questions_per_module))
-        for mod_id, qs in questions_per_module.items():
-            pick = random.sample(qs, min(base, len(qs)))
-            selected.extend(pick)
-        # Top up to target if under
-        used_ids = {q.id for q in selected}
-        remaining = [q for qs in questions_per_module.values() for q in qs if q.id not in used_ids]
-        random.shuffle(remaining)
-        selected.extend(remaining[: max(0, target - len(selected))])
-
-    random.shuffle(selected)
-
-    exam_id = str(uuid.uuid4())
-    session = ExamSession(
-        id=exam_id,
-        user_id=user.id,
-        total_questions=len(selected),
-    )
-    db.add(session)
-    db.commit()
-
-    def _q_out(q: Question) -> dict[str, Any]:
-        choices = list(q.choices)
-        random.shuffle(choices)
-        return {
-            "id": q.id,
-            "question_text": q.question_text,
-            "module_title": q.module.title if q.module else "",
-            "module_slug": q.module.slug if q.module else "",
-            "choices": [{"id": c.id, "text": c.choice_text} for c in choices],
-        }
-
-    return {
-        "exam_id": exam_id,
-        "questions": [_q_out(q) for q in selected],
-        "total": len(selected),
-        "time_limit_minutes": 90,
-    }
-
-
-@app.post("/api/exam/{exam_id}/submit")
-def exam_submit(
-    exam_id: str,
-    payload: ExamSubmitIn,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    user = require_user(request, db)
-    session = db.scalar(select(ExamSession).where(ExamSession.id == exam_id, ExamSession.user_id == user.id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Exam not found")
-    if session.status == "completed":
-        return json.loads(session.results_json)
-
-    now = datetime.now(timezone.utc)
-    started = session.started_at
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
-    time_taken = round((now - started).total_seconds() / 60, 1)
-
-    correct_total = 0
-    module_scores: dict[str, dict[str, Any]] = {}
-    missed_questions: list[dict[str, Any]] = []
-
-    for q_id_str, choice_id in payload.answers.items():
-        q = db.scalar(
-            select(Question)
-            .options(selectinload(Question.choices), selectinload(Question.module))
-            .where(Question.id == int(q_id_str))
-        )
-        if not q:
-            continue
-        correct_choice = next((c for c in q.choices if c.is_correct), None)
-        chosen_choice = next((c for c in q.choices if c.id == int(choice_id)), None)
-        is_correct = correct_choice is not None and chosen_choice is not None and correct_choice.id == chosen_choice.id
-
-        slug = q.module.slug if q.module else "unknown"
-        title = q.module.title if q.module else "Unknown"
-        if slug not in module_scores:
-            module_scores[slug] = {"title": title, "correct": 0, "total": 0, "pct": 0}
-        module_scores[slug]["total"] += 1
-        if is_correct:
-            correct_total += 1
-            module_scores[slug]["correct"] += 1
-        else:
-            missed_questions.append({
-                "id": q.id,
-                "question_text": q.question_text,
-                "correct_answer": correct_choice.choice_text if correct_choice else "",
-                "your_answer": chosen_choice.choice_text if chosen_choice else "No answer",
-                "module_title": title,
-            })
-            # Add to mistake bank
-            existing_mistake = db.scalar(
-                select(MistakeBank).where(MistakeBank.user_id == user.id, MistakeBank.question_id == q.id)
-            )
-            if existing_mistake:
-                existing_mistake.times_missed += 1
-                existing_mistake.last_missed_at = now
-            else:
-                db.add(MistakeBank(user_id=user.id, question_id=q.id, times_missed=1))
-
-    for slug in module_scores:
-        s = module_scores[slug]
-        s["pct"] = round(s["correct"] / s["total"] * 100) if s["total"] else 0
-
-    total_q = max(1, len(payload.answers))
-    score_pct = round(correct_total / total_q * 100)
-    passed = score_pct >= 70
-
-    results = {
-        "score": score_pct,
-        "passed": passed,
-        "correct": correct_total,
-        "total": total_q,
-        "time_taken_minutes": time_taken,
-        "module_scores": module_scores,
-        "missed_questions": missed_questions[:20],
-    }
-
-    session.status = "completed"
-    session.completed_at = now
-    session.score = score_pct
-    session.answers_json = json.dumps({str(k): v for k, v in payload.answers.items()})
-    session.results_json = json.dumps(results)
-    db.commit()
-
-    return results
-
-
-@app.get("/api/exam/{exam_id}/results")
-def exam_results(exam_id: str, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    user = require_user(request, db)
-    session = db.scalar(select(ExamSession).where(ExamSession.id == exam_id, ExamSession.user_id == user.id))
-    if not session or session.status != "completed":
-        raise HTTPException(status_code=404, detail="Results not available")
-    return json.loads(session.results_json)
-
-
-# ── Account deletion ──────────────────────────────────────────────────────────
-
-@app.delete("/api/account")
-def delete_account(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    user = require_user(request, db)
-    db.delete(user)
-    db.commit()
-    request.session.clear()
-    return {"ok": True, "message": "Account and all data deleted."}
-
-
-# ── Privacy & Terms ───────────────────────────────────────────────────────────
-
-_PRIVACY_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Privacy Policy — P&C Prep Academy</title>
-<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.7;color:#222}
-h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:2em}a{color:#6366f1}code{background:#f3f4f6;padding:2px 6px;border-radius:4px}</style>
-</head><body>
-<h1>Privacy Policy</h1>
-<p><em>Last updated: June 2026</em></p>
-<h2>What data we collect</h2>
-<p>When you sign in with Google, Microsoft, or Facebook we receive your <strong>email address</strong> and <strong>display name</strong>. No password is stored.</p>
-<p>As you study, we store: lesson completion records, quiz scores, practice quiz answers, mistake bank entries, flashcard review history, diagnostic quiz results, and exam simulation sessions. All of this is stored only to power your personalised study plan.</p>
-<h2>How data is used</h2>
-<p>Your data is used solely to provide the P&amp;C Prep Academy service. It is <strong>never sold</strong> and <strong>never shared with third parties</strong>.</p>
-<h2>Where data is stored</h2>
-<p>All data is stored on our own server. We do not use third-party analytics or advertising services.</p>
-<h2>How to delete your data</h2>
-<p>You can permanently delete your account and all associated data by sending a <code>DELETE /api/account</code> request while signed in. This is irreversible and cascades to all study records.</p>
-<h2>Cookies</h2>
-<p>We use a single session cookie to keep you signed in. No tracking or advertising cookies are used.</p>
-<h2>Contact</h2>
-<p>Questions? Email <a href="mailto:logan@weinsurethings.com">logan@weinsurethings.com</a>.</p>
-<p><a href="/">← Back to app</a></p>
-</body></html>"""
-
-_TERMS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Terms of Use — P&C Prep Academy</title>
-<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.7;color:#222}
-h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:2em}a{color:#6366f1}</style>
-</head><body>
-<h1>Terms of Use</h1>
-<p><em>Last updated: June 2026</em></p>
-<h2>Educational tool only</h2>
-<p>P&amp;C Prep Academy is a free educational study tool. It is designed to help you prepare for the P&amp;C insurance licensing exam. It does <strong>not</strong> guarantee that you will pass the exam.</p>
-<h2>Not professional or legal advice</h2>
-<p>Nothing on this platform constitutes professional, legal, or insurance advice. Study content is prepared for educational purposes only.</p>
-<h2>Age requirement</h2>
-<p>You must be 18 years of age or older to use this service, or have obtained parental/guardian consent.</p>
-<h2>No warranty</h2>
-<p>This service is provided "as is" without warranty of any kind. We make no representations about the accuracy or completeness of the study content.</p>
-<h2>Account termination</h2>
-<p>We reserve the right to suspend or delete accounts that misuse the platform.</p>
-<h2>Changes to terms</h2>
-<p>We may update these terms at any time. Continued use of the service constitutes acceptance of the current terms.</p>
-<p><a href="/">← Back to app</a></p>
-</body></html>"""
-
-
-@app.get("/privacy", response_class=HTMLResponse)
-def privacy() -> str:
-    return _PRIVACY_HTML
-
-
-@app.get("/terms", response_class=HTMLResponse)
-def terms_page() -> str:
-    return _TERMS_HTML
