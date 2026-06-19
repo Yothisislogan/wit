@@ -52,6 +52,10 @@ class Settings:
     def tutor_mode(self) -> str:
         return "ollama"
 
+    gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
+    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    coverage_coach_provider: str = os.environ.get("COVERAGE_COACH_PROVIDER", "gemini")
+
     @property
     def openai_api_key(self) -> str:
         return os.environ.get("OPENAI_API_KEY", "")

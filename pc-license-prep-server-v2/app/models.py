@@ -220,3 +220,14 @@ class ExamSession(Base):
     total_questions: Mapped[int] = mapped_column(Integer, default=50)
     answers_json: Mapped[str] = mapped_column(Text, default="{}")
     results_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class CoachRateLimit(Base):
+    __tablename__ = "coach_rate_limits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    window_hour: Mapped[str] = mapped_column(String(20))   # "2026-06-19T03"
+    window_day: Mapped[str] = mapped_column(String(12))    # "2026-06-19"
+    hour_count: Mapped[int] = mapped_column(Integer, default=0)
+    day_count: Mapped[int] = mapped_column(Integer, default=0)

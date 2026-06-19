@@ -113,6 +113,8 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
             "ALTER TABLE users ADD COLUMN state VARCHAR(2)",
             "ALTER TABLE modules ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
+            "CREATE TABLE IF NOT EXISTS coach_rate_limits (id INTEGER PRIMARY KEY, user_id INTEGER, window_hour TEXT, window_day TEXT, hour_count INTEGER DEFAULT 0, day_count INTEGER DEFAULT 0)",
+            "CREATE INDEX IF NOT EXISTS idx_coach_rate_user ON coach_rate_limits(user_id)",
         ]:
             try:
                 db.execute(text(stmt))
@@ -208,7 +210,7 @@ def health(db: Session = Depends(get_db)):
         "questions": db.scalar(select(func.count()).select_from(Question)),
         "providers": configured_providers(),
         "free_public_access": True,
-        "coverage_coach_mode": "openai" if settings.openai_api_key else "fallback",
+        "coverage_coach_mode": settings.coverage_coach_provider if settings.gemini_api_key else ("openai" if settings.openai_api_key else "fallback"),
     }
 
 
