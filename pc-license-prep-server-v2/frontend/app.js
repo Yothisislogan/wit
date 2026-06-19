@@ -4,7 +4,7 @@ let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessag
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
-async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}if(!me.course){return courseSelector()}if(!me.state){return stateSelector()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
+async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}if(!me.course||!me.state){return courseSelector()}if(!me.state){return stateSelector()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
 async function courseSelector(opts={}){
   const courses=[
     {id:'pc',icon:'🏠',title:'Property & Casualty',sub:'P&C License Exam Prep',detail:'14 modules · 90 lessons'},
