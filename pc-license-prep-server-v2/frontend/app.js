@@ -1,6 +1,6 @@
 const app=document.getElementById('app');
 const toastEl=document.getElementById('toast');
-let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];let studioModuleSlug=null;
+let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];let studioModuleSlug=null;let currentQuizIndex=0;let flashcardIndex=0;let flashcardFlipped=false;
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
@@ -295,9 +295,93 @@ async function _saveLessonProgress(id){
 }
 async function completeAndAdvance(id,nextSlug){await _saveLessonProgress(id);route('lesson',nextSlug);}
 async function completeAndDone(id){await _saveLessonProgress(id);toast('Module complete!');showDashboard();}
-async function terms(){const rows=await api('/api/terms');app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Flashcards</h1><div class="list">${rows.map(t=>`<div class="card"><span class="pill">${esc(t.term)}</span><p><strong>Plain English:</strong> ${esc(t.plain_english_definition)}</p><p><strong>Exam:</strong> ${esc(t.exam_definition)}</p>${t.example?`<p class="muted"><strong>Example:</strong> ${esc(t.example)}</p>`:''}</div>`).join('')}</div></div></div>`}
-async function quiz(moduleSlug){answers={};currentQuestions=await api('/api/questions?limit=10'+(moduleSlug?'&module_slug='+encodeURIComponent(moduleSlug):''));renderQuiz()}
-function renderQuiz(results=null){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Quiz</h1>${currentQuestions.map((q,i)=>`<div class="card"><div class="eyebrow">Question ${i+1}</div><h3>${esc(q.question_text)}</h3><div class="choices">${q.choices.map(c=>{let cls='choice';const r=results&&results.find(x=>x.question.id===q.id);if(answers[q.id]===c.id)cls+=' selected';if(r&&c.is_correct)cls+=' correct';if(r&&answers[q.id]===c.id&&!r.is_correct)cls+=' wrong';return `<div class="${cls}" onclick="answers[${q.id}]=${c.id};renderQuiz(${results?'lastResults':'null'})">${esc(c.choice_text)}</div>`}).join('')}</div>${results?`<p>${esc((results.find(x=>x.question.id===q.id)||{}).question?.explanation||'')}</p>`:''}</div>`).join('')}<div class="toolbar"><button class="primary" onclick="submitQuiz()">Submit</button><button onclick="quiz()">New Quiz</button></div></div></div>`}
+async function terms(){
+  const rows=await api('/api/terms');
+  if(!rows.length){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Dashboard</button><p>No flashcards yet.</p></div></div>`;return;}
+  flashcardIndex=0;flashcardFlipped=false;renderFlashcard(rows);
+}
+function renderFlashcard(rows){
+  const t=rows[flashcardIndex];
+  const progress=`${flashcardIndex+1} of ${rows.length}`;
+  app.innerHTML=`<div class="page-wrap"><div class="card">
+    <button onclick="route('dashboard')">← Dashboard</button>
+    <h1>Flashcards</h1>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div class="eyebrow">${progress}</div>
+      <div class="progress-bar" style="width:200px;height:6px;background:var(--border);border-radius:3px">
+        <div style="width:${((flashcardIndex+1)/rows.length*100)}%;height:100%;background:var(--accent);border-radius:3px"></div>
+      </div>
+    </div>
+    <div class="flashcard" onclick="flashcardFlipped=!flashcardFlipped;renderFlashcard(rows)" style="cursor:pointer;min-height:200px;padding:2rem;background:var(--surface);border:2px solid var(--border);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transition:all .2s">
+      ${!flashcardFlipped
+        ?`<div class="pill" style="margin-bottom:1rem">${esc(t.term)}</div><p class="muted">Tap to reveal definition</p>`
+        :`<p><strong>Plain English:</strong> ${esc(t.plain_english_definition)}</p>
+           <p style="margin-top:1rem"><strong>Exam:</strong> ${esc(t.exam_definition)}</p>
+           ${t.example?`<p class="muted" style="margin-top:1rem"><strong>Example:</strong> ${esc(t.example)}</p>`:''}`
+      }
+    </div>
+    <div class="toolbar" style="margin-top:1.5rem">
+      ${flashcardIndex>0?`<button onclick="flashcardIndex--;flashcardFlipped=false;renderFlashcard(rows)">← Prev</button>`:'<span></span>'}
+      ${flashcardIndex<rows.length-1
+        ?`<button class="primary" onclick="flashcardIndex++;flashcardFlipped=false;renderFlashcard(rows)">Next →</button>`
+        :`<button class="primary" onclick="flashcardIndex=0;flashcardFlipped=false;renderFlashcard(rows)">Start Over</button>`
+      }
+    </div>
+  </div></div>`;
+}
+async function quiz(moduleSlug){answers={};currentQuizIndex=0;currentQuestions=await api('/api/questions?limit=10'+(moduleSlug?'&module_slug='+encodeURIComponent(moduleSlug):''));renderQuiz()}
+function renderQuiz(results=null){
+  if(results){
+    const score=results.filter(r=>r.is_correct).length;
+    const total=results.length;
+    const pct=Math.round(score/total*100);
+    app.innerHTML=`<div class="page-wrap"><div class="card">
+      <button onclick="route('dashboard')">← Dashboard</button>
+      <h1>Quiz Results</h1>
+      <div class="quiz-score" style="font-size:2rem;font-weight:700;margin:1rem 0;color:${pct>=70?'#10b981':'#ef4444'}">${pct}% — ${score}/${total} correct</div>
+      <div class="list">${results.map((r,i)=>{
+        const q=currentQuestions[i];
+        return `<div class="card" style="border-left:4px solid ${r.is_correct?'#10b981':'#ef4444'}">
+          <div class="eyebrow">${r.is_correct?'✓ Correct':'✗ Incorrect'}</div>
+          <p><strong>${esc(q.question_text)}</strong></p>
+          <p class="muted">${esc(r.question?.explanation||'')}</p>
+        </div>`;
+      }).join('')}</div>
+      <div class="toolbar">
+        <button class="primary" onclick="quiz()">New Quiz</button>
+        <button onclick="route('dashboard')">Dashboard</button>
+      </div>
+    </div></div>`;
+    return;
+  }
+  const q=currentQuestions[currentQuizIndex];
+  if(!q)return;
+  const progress=`${currentQuizIndex+1} of ${currentQuestions.length}`;
+  app.innerHTML=`<div class="page-wrap"><div class="card">
+    <button onclick="route('dashboard')">← Dashboard</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div class="eyebrow">Question ${progress}</div>
+      <div class="progress-bar" style="width:200px;height:6px;background:var(--border);border-radius:3px">
+        <div style="width:${((currentQuizIndex+1)/currentQuestions.length*100)}%;height:100%;background:var(--accent);border-radius:3px;transition:width .3s"></div>
+      </div>
+    </div>
+    <h3 style="margin-bottom:1.5rem">${esc(q.question_text)}</h3>
+    <div class="choices">${q.choices.map(c=>`
+      <div class="choice${answers[q.id]===c.id?' selected':''}" onclick="answers[${q.id}]=${c.id};renderQuiz()">
+        ${esc(c.choice_text)}
+      </div>`).join('')}
+    </div>
+    <div class="toolbar" style="margin-top:1.5rem">
+      ${currentQuizIndex>0?`<button onclick="currentQuizIndex--;renderQuiz()">← Back</button>`:''}
+      ${answers[q.id]!=null
+        ?currentQuizIndex<currentQuestions.length-1
+          ?`<button class="primary" onclick="currentQuizIndex++;renderQuiz()">Next →</button>`
+          :`<button class="primary" onclick="submitQuiz()">Submit Quiz</button>`
+        :`<button class="primary" disabled>Select an answer</button>`
+      }
+    </div>
+  </div></div>`;
+}
 let lastResults=null;
 async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:'practice',answers})});lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%')}
 async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
@@ -401,6 +485,11 @@ async function showDashboard(){
           <h2 class="dash-section-title">Up Next</h2>
           <div class="dash-recs">${recCards}</div>
         </section>`:''}
+      </div>
+      <div class="dash-footer" style="text-align:center;margin-top:2rem;padding:1rem 0;font-size:.8rem;color:var(--muted);border-top:1px solid var(--border)">
+        <a href="/privacy" target="_blank" style="color:var(--muted)">Privacy Policy</a> ·
+        <a href="/terms" target="_blank" style="color:var(--muted)">Terms of Service</a> ·
+        <span>Free because it's the right thing to do.</span>
       </div>
     </div>
   </div>`;

@@ -446,7 +446,83 @@ def tutor_ask(payload: TutorAskIn, request: Request, db: Session = Depends(get_d
     return ask_coverage_coach(db, user, payload.message)
 
 
-@app.get("/api/dashboard")
+class StudioIn(BaseModel):
+    action: str
+    module_slug: str
+
+@app.post("/api/studio/generate")
+def studio_generate(payload: StudioIn, request: Request, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    module = db.scalars(select(Module).where(Module.slug == payload.module_slug)).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    lessons = db.scalars(select(Lesson).where(Lesson.module_id == module.id, Lesson.is_active == True).order_by(Lesson.sort_order)).all()
+    terms = db.scalars(select(Term).where(Term.module_id == module.id).order_by(Term.term)).all()
+    lesson_dicts = [{"title": l.title, "summary": l.summary or "", "body": l.body[:400] if l.body else "", "example": l.example or ""} for l in lessons]
+    term_dicts = [{"term": t.term, "plain_english_definition": t.plain_english_definition or "", "exam_definition": t.exam_definition or "", "example": t.example or ""} for t in terms]
+    from .tutor import generate_studio_content
+    result = generate_studio_content(payload.action, module.title, term_dicts, lesson_dicts)
+    return result
+
+
+@app.get("/privacy")
+def privacy_page():
+    from fastapi.responses import HTMLResponse
+    html = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy Policy — WIT</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:800px;margin:0 auto;padding:2rem;line-height:1.7;color:#333}h1{color:#1a1a1a}h2{color:#444;margin-top:2rem}a{color:#1a73e8}.back{display:inline-block;margin-bottom:2rem;color:#1a73e8;text-decoration:none}</style>
+</head><body>
+<a href="/" class="back">← Back to WIT</a>
+<h1>Privacy Policy</h1>
+<p><strong>Last updated: June 2026</strong></p>
+<p>We Insure Things ("WIT") is committed to protecting your privacy. This policy explains what information we collect and how we use it.</p>
+<h2>Information We Collect</h2>
+<p>When you sign in with Google or Microsoft, we receive your name and email address. We store your study progress, quiz results, and lesson completions in our database to personalize your learning experience.</p>
+<h2>How We Use Your Information</h2>
+<p>We use your information solely to provide the WIT exam prep service — tracking your progress, personalizing study recommendations, and powering the Coverage Coach AI tutor. We do not sell your data. We do not share your data with third parties except as required to operate the service (OAuth providers for authentication).</p>
+<h2>Coverage Coach AI</h2>
+<p>Coverage Coach uses the Google Gemini API to answer your insurance questions. Your questions are sent to Google's API but are not associated with your personal identity — only the question text is transmitted, not your name or email.</p>
+<h2>Data Storage</h2>
+<p>Your data is stored on dedicated servers. We do not use third-party analytics or advertising services.</p>
+<h2>Your Rights</h2>
+<p>You may request deletion of your account and all associated data by emailing us at privacy@weinsurethings.com.</p>
+<h2>Contact</h2>
+<p>Questions? Email us at privacy@weinsurethings.com</p>
+</body></html>"""
+    return HTMLResponse(html)
+
+
+@app.get("/terms")
+def terms_page():
+    from fastapi.responses import HTMLResponse
+    html = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terms of Service — WIT</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:800px;margin:0 auto;padding:2rem;line-height:1.7;color:#333}h1{color:#1a1a1a}h2{color:#444;margin-top:2rem}a{color:#1a73e8}.back{display:inline-block;margin-bottom:2rem;color:#1a73e8;text-decoration:none}</style>
+</head><body>
+<a href="/" class="back">← Back to WIT</a>
+<h1>Terms of Service</h1>
+<p><strong>Last updated: June 2026</strong></p>
+<p>By using We Insure Things ("WIT") you agree to these terms.</p>
+<h2>The Service</h2>
+<p>WIT provides free insurance licensing exam preparation materials. The service is provided as-is for educational purposes only. WIT is not an accredited educational institution and does not guarantee exam passage.</p>
+<h2>Free Forever</h2>
+<p>WIT is and will remain free. We will never charge for access to study materials, practice questions, or the Coverage Coach AI tutor.</p>
+<h2>Acceptable Use</h2>
+<p>You may use WIT for personal study purposes. You may not scrape, copy, or redistribute our content. You may not attempt to circumvent rate limits or abuse the Coverage Coach AI tutor.</p>
+<h2>AI Tutor Disclaimer</h2>
+<p>Coverage Coach is an AI assistant for exam prep only. It does not provide legal advice, binding insurance opinions, or claim determinations. Always consult a licensed professional for actual insurance matters.</p>
+<h2>Intellectual Property</h2>
+<p>Study content, questions, and materials on WIT are owned by We Insure Things. The WIT monster mascot and branding are proprietary.</p>
+<h2>Limitation of Liability</h2>
+<p>WIT is provided free of charge. To the maximum extent permitted by law, We Insure Things is not liable for any damages arising from use of the service.</p>
+<h2>Contact</h2>
+<p>Questions? Email us at legal@weinsurethings.com</p>
+</body></html>"""
+    return HTMLResponse(html)
+
+
 def dashboard(request: Request, db: Session = Depends(get_db)):
     """Aggregated progress data for the dashboard view."""
     user = require_user(request, db)
