@@ -4,6 +4,17 @@ let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessag
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function cleanTitle(raw){
+  if(!raw)return'WIT Radio Live';
+  let t=raw.replace(/\.mp3$/i,'');
+  t=t.replace(/^(morning_acoustic|day_shift|dance_party|night_shift)_/,'');
+  t=t.replace(/^(hip_hop|rnb|edm|pop)_/,'');
+  t=t.replace(/^[a-z][-a-z]*_/,'');
+  t=t.replace(/^\d{2,3}_/,'');
+  t=t.replace(/_\d{3}$/,'');
+  t=t.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()).trim();
+  return t||'WIT Radio Live';
+}
 async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}if(!me.course||!me.state){return courseSelector()}if(!me.state){return stateSelector()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
 async function courseSelector(opts={}){
   const courses=[
