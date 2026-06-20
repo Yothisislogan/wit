@@ -523,6 +523,7 @@ def terms_page():
     return HTMLResponse(html)
 
 
+@app.get("/api/dashboard")
 def dashboard(request: Request, db: Session = Depends(get_db)):
     """Aggregated progress data for the dashboard view."""
     user = require_user(request, db)
