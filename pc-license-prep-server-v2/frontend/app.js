@@ -97,6 +97,7 @@ function studioPanel(){
 let _wsPanel='chat';
 function _wsTab(p){_wsPanel=p;const panels=document.querySelectorAll('.ws-panels>.pane');const tabs=document.querySelectorAll('.ws-mob-tab');const order=['sources','chat','studio'];panels.forEach((el,i)=>{el.classList.toggle('ws-pane-hidden',order[i]!==p)});tabs.forEach(t=>{t.classList.toggle('ws-mob-tab-active',t.dataset.p===p)})}
 async function workspace(){
+  app.classList.add('ws-locked');
   app.innerHTML=`<div class="workspace"><div class="ws-topbar"><button class="ws-back-btn" onclick="showDashboard()">← Dashboard</button><span class="ws-topbar-title">◈ Study Workspace</span></div><div class="ws-panels">${sourcePanel()}${chatPanel()}${studioPanel()}</div><nav class="ws-mob-nav"><button class="ws-mob-tab" data-p="sources" onclick="_wsTab('sources')">📚 Reference</button><button class="ws-mob-tab ws-mob-tab-active" data-p="chat" onclick="_wsTab('chat')">💬 Chat</button><button class="ws-mob-tab" data-p="studio" onclick="_wsTab('studio')">✦ Studio</button></nav></div>`;
   _wsTab(_wsPanel);
   scrollMessages();
@@ -146,7 +147,7 @@ function studio(action){
   }
   const TITLES={study_guide:'Generating Study Guide…',practice_quiz:'Generating Practice Quiz…',cram_sheet:'Loading Cram Sheet…',concept_map:'Generating Concept Map…'};
   out.innerHTML=`<div class="studio-loading"><div class="studio-spinner"></div><p>${TITLES[action]||'Working…'}</p><small>Coverage Coach is thinking — may take 30–60s.</small></div>`;
-  api('/api/studio/generate','POST',{action,module_slug:studioModuleSlug})
+  api('/api/studio/generate',{method:'POST',body:JSON.stringify({action,module_slug:studioModuleSlug})})
     .then(data=>{
       if(action==='study_guide')        renderStudyGuide(out,data);
       else if(action==='practice_quiz') renderPracticeQuiz(out,data);
@@ -386,7 +387,7 @@ let lastResults=null;
 async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:'practice',answers})});lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%')}
 async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
 boot();
-async function showDashboard(){
+async function showDashboard(){app.classList.remove('ws-locked');
   app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your dashboard…</p></div>';
   let d;
   try{d=await api('/api/dashboard');}
