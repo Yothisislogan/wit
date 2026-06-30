@@ -166,17 +166,3 @@ async def oauth_callback(request: Request, db: Session, provider: str):
     user = upsert_oauth_user(db, provider, profile)
     request.session["user_id"] = user.id
     return RedirectResponse(url="/")
-
-
-def dev_login(request: Request, db: Session):
-    if not settings.enable_dev_login:
-        raise HTTPException(status_code=404, detail="Development login is disabled")
-    profile = {
-        "provider_user_id": "dev-user",
-        "email": "dev@example.com",
-        "name": "Demo Student",
-        "avatar_url": None,
-    }
-    user = upsert_oauth_user(db, "dev", profile)
-    request.session["user_id"] = user.id
-    return RedirectResponse(url="/")

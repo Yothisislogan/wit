@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
 
-from .auth import configured_providers, dev_login, login_redirect, oauth_callback, public_user, require_user
+from .auth import configured_providers, login_redirect, oauth_callback, public_user, require_user
 from .content_loader import seed_course_if_empty
 from .database import SessionLocal, create_all, get_db
 from .models import AnswerChoice, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term, User
@@ -216,7 +216,7 @@ def health(db: Session = Depends(get_db)):
 
 @app.get("/auth/providers")
 def auth_providers():
-    return {"providers": configured_providers(), "dev_login_enabled": settings.enable_dev_login}
+    return {"providers": configured_providers()}
 
 
 @app.get("/auth/login/{provider}")
@@ -227,11 +227,6 @@ async def login(provider: str, request: Request):
 @app.get("/auth/callback/{provider}")
 async def callback(provider: str, request: Request, db: Session = Depends(get_db)):
     return await oauth_callback(request, db, provider)
-
-
-@app.get("/auth/dev-login")
-def dev(request: Request, db: Session = Depends(get_db)):
-    return dev_login(request, db)
 
 
 @app.post("/auth/logout")

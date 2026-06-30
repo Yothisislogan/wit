@@ -28,7 +28,6 @@ class Settings:
     database_url: str = os.environ.get("DATABASE_URL", "sqlite:///./pc_prep_v2.db")
     session_secret: str = os.environ.get("SESSION_SECRET", "change-me-in-production")
     cors_origins: str = os.environ.get("CORS_ORIGINS", "*")
-    enable_dev_login: bool = _bool("ENABLE_DEV_LOGIN", True)
 
     google_client_id: str = os.environ.get("GOOGLE_CLIENT_ID", "")
     google_client_secret: str = os.environ.get("GOOGLE_CLIENT_SECRET", "")
