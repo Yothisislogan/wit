@@ -112,6 +112,8 @@ async def lifespan(app: FastAPI):
         for stmt in [
             "ALTER TABLE users ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
             "ALTER TABLE users ADD COLUMN state VARCHAR(2)",
+            "ALTER TABLE users ADD COLUMN anon_id VARCHAR(64)",
+            "CREATE INDEX IF NOT EXISTS idx_users_anon_id ON users(anon_id)",
             "ALTER TABLE modules ADD COLUMN course VARCHAR(20) DEFAULT 'pc'",
             "CREATE TABLE IF NOT EXISTS coach_rate_limits (id INTEGER PRIMARY KEY, user_id INTEGER, window_hour TEXT, window_day TEXT, hour_count INTEGER DEFAULT 0, day_count INTEGER DEFAULT 0)",
             "CREATE INDEX IF NOT EXISTS idx_coach_rate_user ON coach_rate_limits(user_id)",
@@ -237,17 +239,12 @@ def logout(request: Request):
 
 @app.get("/api/me")
 def me(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return {"user": None}
-    user = db.get(User, int(user_id))
-    if not user:
-        return {"user": None}
+    user = require_user(request, db)
     base = public_user(user)
     course = getattr(user, "course", "pc") or "pc"
     state = getattr(user, "state", None)
     state_name = STATE_EXAM_INFO.get(state or "", {}).get("state_name") if state else None
-    return {"user": {**base, "course": course, "state": state, "state_name": state_name}}
+    return {"user": {**base, "course": course, "state": state, "state_name": state_name, "is_anon": user.email is None}}
 
 
 @app.post("/api/me/course")

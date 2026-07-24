@@ -1,8 +1,17 @@
+function getAnonId(){
+  let id = localStorage.getItem('wit_anon_id');
+  if(!id){
+    id = (crypto.randomUUID && crypto.randomUUID()) ||
+         ('anon-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+    localStorage.setItem('wit_anon_id', id);
+  }
+  return id;
+}
 const app=document.getElementById('app');
 const toastEl=document.getElementById('toast');
 let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];let studioModuleSlug=null;let currentQuizIndex=0;let flashcardIndex=0;let flashcardFlipped=false;
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
-async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});if(!res.ok){throw new Error(await res.text())}return res.json()}
+async function api(path,opts={}){const res=await fetch(path,{credentials:'include',...opts,headers:{'Content-Type':'application/json','X-Anon-Id':getAnonId(),...(opts.headers||{})}});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function cleanTitle(raw){
   if(!raw)return'WIT Radio Live';
@@ -15,7 +24,14 @@ function cleanTitle(raw){
   t=t.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()).trim();
   return t||'WIT Radio Live';
 }
-async function boot(){const m=await api('/api/me');me=m.user;if(!me){return loginScreen()}if(!me.course||!me.state){return courseSelector()}if(!me.state){return stateSelector()}modules=await api('/api/modules');chatMessages=[];route('dashboard')}
+async function boot(){
+  const m = await api('/api/me');
+  me = m.user;
+  if(!me.course || !me.state){ return courseSelector(); }
+  modules = await api('/api/modules');
+  chatMessages = [];
+  route('dashboard');
+}
 async function courseSelector(opts={}){
   const courses=[
     {id:'pc',icon:'🏠',title:'Property & Casualty',sub:'P&C License Exam Prep',detail:'14 modules · 90 lessons'},
@@ -58,7 +74,7 @@ async function loginScreen(){
   }).join('');
   app.innerHTML=`<div class="login-page"><section class="login-card"><div class="login-logo">◈</div><h1 class="login-title">P&amp;C Prep Academy</h1><p class="login-sub">Sign in to track your progress toward your license</p><div class="login-btns">${providerBtns}</div><p class="login-fine">By signing in you agree to our <a href="/terms">Terms of Use</a> and <a href="/privacy">Privacy Policy</a>.</p></section></div>`;
 }
-async function route(name,arg){try{if(!me)return loginScreen();if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
+async function route(name,arg){try{if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
 function sourcePanel(){const courseLabel=me&&me.course==='lh'?'Life & Health':'Property & Casualty';return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><span class="course-badge" onclick="courseSelector()" title="Switch course" style="cursor:pointer;font-size:.75rem;padding:2px 8px;border-radius:12px;background:var(--accent-muted,#e8f0fe);color:var(--accent,#1a73e8);margin-left:8px">${esc(courseLabel)}</span><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
 function chatPanel(){
   const intro = chatMessages.length === 0
@@ -395,7 +411,11 @@ function renderQuiz(results=null){
 }
 let lastResults=null;
 async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:'practice',answers})});lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%')}
-async function logout(){await api('/auth/logout',{method:'POST'});location.reload()}
+function logout(){
+  if(!confirm('Reset your progress? This clears your saved study data on this browser.')) return;
+  localStorage.removeItem('wit_anon_id');
+  location.reload();
+}
 boot();
 async function showDashboard(){app.classList.remove('ws-locked');
   app.innerHTML='<div class="page-wrap"><p style="padding:2rem;text-align:center;color:var(--text-muted)">Loading your dashboard…</p></div>';
@@ -465,7 +485,7 @@ async function showDashboard(){app.classList.remove('ws-locked');
       <span class="dash-brand">◈ ${me&&me.course==='lh'?'L&amp;H':'P&amp;C'} Prep Academy <button class="course-switch-link" onclick="courseSelector({switchable:true})">Switch</button></span>
       <div style="display:flex;align-items:center;gap:.6rem">
         <button class="primary dash-ws-btn" onclick="workspace()">Workspace →</button>
-        <button class="ghost signout-btn" onclick="logout()" title="Sign out">Sign out</button>
+        <button class="ghost signout-btn" onclick="logout()" title="Reset progress">Reset progress</button>
       </div>
     </header>
     ${stateBanner}

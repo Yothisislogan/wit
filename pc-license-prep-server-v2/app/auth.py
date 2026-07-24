@@ -54,13 +54,33 @@ def configured_providers() -> list[dict[str, Any]]:
 
 
 def require_user(request: Request, db: Session) -> User:
+    # 1. OAuth session takes precedence
     user_id = request.session.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Please sign in first")
-    user = db.get(User, int(user_id))
-    if not user:
-        request.session.clear()
-        raise HTTPException(status_code=401, detail="Please sign in first")
+    if user_id:
+        user = db.get(User, int(user_id))
+        if user:
+            return user
+
+    # 2. Fall back to anonymous ID from header
+    anon_id = request.headers.get("X-Anon-Id", "").strip()
+    if not anon_id or len(anon_id) > 64:
+        raise HTTPException(status_code=400, detail="Missing or invalid identifier")
+
+    user = db.scalars(select(User).where(User.anon_id == anon_id)).first()
+    if user:
+        return user
+
+    # 3. First visit — create the anonymous user
+    user = User(
+        anon_id=anon_id,
+        name="Student",
+        email=None,
+        course="pc",
+        state=None,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
     return user
 
 
