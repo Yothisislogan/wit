@@ -879,6 +879,7 @@ def main():
                         question_id=q.id,
                         choice_text=choice_text,
                         is_correct=is_correct,
+                        explanation=rationale,
                         sort_order=sort_order,
                     ))
                 loaded += 1

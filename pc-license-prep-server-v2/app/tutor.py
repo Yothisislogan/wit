@@ -11,8 +11,9 @@ import httpx
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
-from .models import Lesson, MistakeBank, Question, Term, User
+from .models import Lesson, MistakeBank, Module, Question, Term, User
 from .settings import settings
+from .study_scope import module_scope
 
 # ── LIMITS ────────────────────────────────────────────────────────────────────
 HOUR_LIMIT = 20   # requests per hour per user
@@ -117,8 +118,8 @@ def _keywords(message: str) -> list[str]:
 
 def get_tutor_context(db: Session, user: User, message: str, limit: int = 6) -> TutorContext:
     words = _keywords(message)
-    lesson_stmt = select(Lesson).where(Lesson.is_active == True)
-    term_stmt = select(Term)
+    lesson_stmt = select(Lesson).join(Module).where(Lesson.is_active == True, module_scope(user))
+    term_stmt = select(Term).join(Module).where(module_scope(user))
     if words:
         lesson_filters, term_filters = [], []
         for word in words:
@@ -129,7 +130,7 @@ def get_tutor_context(db: Session, user: User, message: str, limit: int = 6) -> 
         term_stmt = term_stmt.where(or_(*term_filters))
     lessons = list(db.scalars(lesson_stmt.order_by(Lesson.sort_order, Lesson.id).limit(limit)).all())
     terms = list(db.scalars(term_stmt.order_by(Term.term).limit(limit)).all())
-    mistakes = list(db.scalars(select(MistakeBank).options(selectinload(MistakeBank.question).selectinload(Question.choices)).where(MistakeBank.user_id == user.id).order_by(MistakeBank.times_missed.desc()).limit(3)).all())
+    mistakes = list(db.scalars(select(MistakeBank).join(Question).join(Module).options(selectinload(MistakeBank.question).selectinload(Question.choices)).where(MistakeBank.user_id == user.id, MistakeBank.mastered_at.is_(None), Question.is_active == True, module_scope(user)).order_by(MistakeBank.times_missed.desc()).limit(3)).all())
     return TutorContext(lessons=lessons, terms=terms, mistakes=mistakes)
 
 
@@ -263,15 +264,17 @@ def _static_topic_answer(message: str) -> str:
     return ""
 
 
-def _fallback_answer(ctx: TutorContext, message: str = "") -> dict[str, Any]:
+def _fallback_answer(ctx: TutorContext, message: str = "", course: str = "pc") -> dict[str, Any]:
     context = format_context(ctx)
-    topical = _static_topic_answer(message)
+    # These canned definitions are P&C-specific (notably coinsurance).
+    topical = _static_topic_answer(message) if course == "pc" else ""
     if topical:
         answer = topical
     elif context:
         answer = f"{FALLBACK_RESPONSE}\n\nRelevant course notes:\n{context[:1800]}"
     else:
-        answer = f"{FALLBACK_RESPONSE}\n\nAsk about a specific term like peril, hazard, deductible, coinsurance, inland marine, homeowners, CGL, or business auto."
+        examples = "beneficiaries, life policies, health plans, or annuities" if course == "lh" else "peril, hazard, deductibles, homeowners, or business auto"
+        answer = f"{FALLBACK_RESPONSE}\n\nAsk about a specific term like {examples}."
     return {"answer": answer, "mode": "fallback", "model": None, "used_course_context": bool(context), "guardrail": GUARDRAIL}
 
 
@@ -293,7 +296,10 @@ def ask_coverage_coach(db: Session, user: User, message: str) -> dict[str, Any]:
     course_context = format_context(ctx)
 
     # 4. Build prompt
-    prompt = f"""Student question:
+    prompt = f"""Student's selected course: {user.course or 'pc'}
+Student's selected state: {user.state or 'Not selected; keep guidance state-neutral'}
+
+Student question:
 {message}
 
 Approved course context:
@@ -306,7 +312,7 @@ Answer as Coverage Coach. Be concise, helpful, and exam-focused.""".strip()
         answer, mode, model = _call_best_model(SYSTEM_PROMPT, prompt)
         return {"answer": answer, "mode": mode, "model": model, "used_course_context": bool(course_context), "guardrail": GUARDRAIL}
     except Exception:
-        return _fallback_answer(ctx, message)
+        return _fallback_answer(ctx, message, user.course or "pc")
 
 
 def call_ollama_raw(system: str, user_prompt: str) -> str | None:

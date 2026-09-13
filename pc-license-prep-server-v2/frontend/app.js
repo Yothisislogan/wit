@@ -10,6 +10,11 @@ function getAnonId(){
 const app=document.getElementById('app');
 const toastEl=document.getElementById('toast');
 let me=null;let modules=[];let currentQuestions=[];let answers={};let chatMessages=[];let studioModuleSlug=null;let currentQuizIndex=0;let flashcardIndex=0;let flashcardFlipped=false;
+let flashcardRows=[];
+let quizContext={moduleSlug:null,mistakesOnly:false};
+let quizSubmitting=false;
+let lessonSavePending=false;
+let studioQuizState=[];
 function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),2200)}
 async function api(path,opts={}){const res=await fetch(path,{credentials:'include',...opts,headers:{'Content-Type':'application/json','X-Anon-Id':getAnonId(),...(opts.headers||{})}});if(!res.ok){throw new Error(await res.text())}return res.json()}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
@@ -42,6 +47,7 @@ async function courseSelector(opts={}){
 async function pickCourse(courseId){
   const res=await api('/api/me/course',{method:'POST',body:JSON.stringify({course:courseId})});
   me.course=res.course;
+  studioModuleSlug=null;
   modules=await api('/api/modules');
   chatMessages=[];
   if(!me.state){return stateSelector();}
@@ -58,6 +64,7 @@ async function pickState(){
   if(!val){toast('Please select a state first');return;}
   const res=await api('/api/me/state',{method:'POST',body:JSON.stringify({state:val})});
   me.state=res.state;me.state_name=res.state_name;
+  studioModuleSlug=null;
   modules=await api('/api/modules');chatMessages=[];
   route('dashboard');
 }
@@ -74,7 +81,7 @@ async function loginScreen(){
   }).join('');
   app.innerHTML=`<div class="login-page"><section class="login-card"><div class="login-logo">◈</div><h1 class="login-title">P&amp;C Prep Academy</h1><p class="login-sub">Sign in to track your progress toward your license</p><div class="login-btns">${providerBtns}</div><p class="login-fine">By signing in you agree to our <a href="/terms">Terms of Use</a> and <a href="/privacy">Privacy Policy</a>.</p></section></div>`;
 }
-async function route(name,arg){try{if(name==='dashboard')return showDashboard();if(name==='modules')return showModules();if(name==='module')return showModule(arg);if(name==='lesson')return showLesson(arg);if(name==='terms')return terms();if(name==='quiz')return quiz(arg);if(name==='coach')return workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div></div>`}}
+async function route(name,arg){try{if(name!=='coach')app.classList.remove('ws-locked');if(name==='dashboard')return await showDashboard();if(name==='modules')return await showModules();if(name==='module')return await showModule(arg);if(name==='lesson')return await showLesson(arg);if(name==='terms')return await terms(arg);if(name==='quiz')return await quiz(arg);if(name==='coach')return await workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p><button onclick="route('dashboard')">Back to dashboard</button></div></div>`}}
 function sourcePanel(){const courseLabel=me&&me.course==='lh'?'Life & Health':'Property & Casualty';return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><span class="course-badge" onclick="courseSelector()" title="Switch course" style="cursor:pointer;font-size:.75rem;padding:2px 8px;border-radius:12px;background:var(--accent-muted,#e8f0fe);color:var(--accent,#1a73e8);margin-left:8px">${esc(courseLabel)}</span><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
 function chatPanel(){
   const intro = chatMessages.length === 0
@@ -112,8 +119,8 @@ function studioPanel(){
     <button class="studio-tile tile-quiz"  onclick="studio('practice_quiz')"><span>✎<br>Practice Quiz</span><b>›</b></button>
     <button class="studio-tile tile-cram"  onclick="studio('cram_sheet')"><span>⚡<br>Cram Sheet</span><b>›</b></button>
     <button class="studio-tile tile-map"   onclick="studio('concept_map')"><span>⌘<br>Concept Map</span><b>›</b></button>
-    <button class="studio-tile tile-flash" onclick="route('terms')"><span>▧<br>Flashcards</span><b>›</b></button>
-    <button class="studio-tile tile-exam"  onclick="route('quiz',studioModuleSlug||undefined)"><span>▢<br>Exam Sim</span><b>›</b></button>
+    <button class="studio-tile tile-flash" onclick="route('terms',studioModuleSlug||undefined)"><span>▧<br>Flashcards</span><b>›</b></button>
+    <button class="studio-tile tile-exam"  onclick="route('quiz',studioModuleSlug||undefined)"><span>▢<br>Practice Quiz</span><b>›</b></button>
   </div>
   <div class="studio-output" id="studioOutput">
     <div class="studio-empty"><div class="spark">✦</div>
@@ -223,9 +230,19 @@ function renderConceptMap(out,data){
 }
 
 function renderPracticeQuiz(out,data){
-  if(data.error||!data.questions||!data.questions.length){
+  const valid=Array.isArray(data.questions)&&data.questions.length&&data.questions.every(q=>
+    q&&typeof q.q==='string'&&Array.isArray(q.choices)&&q.choices.length>=2&&
+    q.choices.every(c=>typeof c==='string')&&Number.isInteger(q.correct)&&q.correct>=0&&q.correct<q.choices.length);
+  if(data.error||!valid){
     out.innerHTML=`<div class="studio-msg studio-error">${esc(data.error||'No questions generated. Make sure Ollama is running and try again.')}</div>`;return;
   }
+  // Generated and fallback quizzes also need shuffled choices. Carry the
+  // correct choice through the shuffle instead of retaining its old index.
+  data={...data,questions:data.questions.map(q=>{
+    const choices=q.choices.map((text,index)=>({text,correct:index===q.correct}));
+    for(let i=choices.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[choices[i],choices[j]]=[choices[j],choices[i]];}
+    return {...q,choices:choices.map(c=>c.text),correct:choices.findIndex(c=>c.correct)};
+  })};
   studioQuizState=data.questions.map(()=>null);
   const cards=data.questions.map((q,qi)=>{
     const choices=q.choices.map((c,ci)=>`<button class="qchoice" id="qc-${qi}-${ci}" onclick="answerQ(${qi},${ci})">${String.fromCharCode(65+ci)}. ${esc(c)}</button>`).join('');
@@ -267,10 +284,11 @@ function answerQ(qi,ci){
     document.getElementById('practice-quiz-cards').appendChild(summary);
   }
 }
-async function showModules(){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>Course Sources</h1><p class="muted">These are your built-in P&C study sources.</p><div class="grid">${modules.map(m=>`<div class="card"><div class="eyebrow">${m.lesson_count} lessons</div><h2>${esc(m.title)}</h2><p class="muted">${esc(m.description)}</p><button onclick="route('module','${m.slug}')">Open</button></div>`).join('')}</div></div></div>`}
+async function showModules(){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Dashboard</button><h1>Your Course</h1><p class="muted">Study material for ${me&&me.course==='lh'?'Life & Health':'Property & Casualty'}${me&&me.state_name?' in '+esc(me.state_name):''}.</p><div class="grid">${modules.map(m=>`<div class="card"><div class="eyebrow">${m.lesson_count} lessons</div><h2>${esc(m.title)}</h2><p class="muted">${esc(m.description)}</p><button onclick="route('module','${m.slug}')">Open</button></div>`).join('')}</div></div></div>`}
 async function showModule(slug){const m=await api('/api/modules/'+slug);app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description)}</p><div class="list">${m.lessons.map(l=>`<div class="row"><div><strong>${esc(l.title)}</strong><br><span class="muted">${esc(l.summary)}</span></div><button onclick="route('lesson','${l.slug}')">Study</button></div>`).join('')}</div><div class="toolbar"><button onclick="route('quiz','${m.slug}')">Quiz This Module</button><button onclick="quickAsk('Explain the ${esc(m.title)} module and quiz me on it.')">Ask Coverage Coach</button></div></div></div>`}
 async function showLesson(slug){
   const l=await api('/api/lessons/'+slug);
+  const saved=l.progress||{completed:false,confidence:0,notes:'',saved_for_review:false};
   let prev=null,next=null,lessonNum=0,total=0;
   try{
     const mod=await api('/api/modules/'+l.module_slug);
@@ -287,8 +305,8 @@ async function showLesson(slug){
     ?`<button onclick="route('lesson','${esc(prev.slug)}')">← Previous</button>`
     :`<button disabled>← Previous</button>`;
   const nextBtn=next
-    ?`<button class="primary" onclick="completeAndAdvance(${l.id},'${esc(next.slug)}')">Mark Complete &amp; Next →</button>`
-    :`<button class="primary" onclick="completeAndDone(${l.id})">Mark Complete ✓</button>`;
+    ?`<button class="primary" data-lesson-save onclick="completeAndAdvance(${l.id},'${esc(next.slug)}')">Mark Complete &amp; Next →</button>`
+    :`<button class="primary" data-lesson-save onclick="completeAndDone(${l.id})">Mark Complete ✓</button>`;
   app.innerHTML=`<div class="page-wrap"><article class="lesson card">
     <div class="lesson-nav-top">
       <button onclick="route('module','${esc(l.module_slug)}')">← ${esc(l.module_title||'Module')}</button>
@@ -301,33 +319,57 @@ async function showLesson(slug){
     ${l.memory_tip?`<h3>Memory tip</h3><p>${esc(l.memory_tip)}</p>`:''}
     <h3>Key terms</h3>
     <div class="term-grid">${termsHtml}</div>
-    <details class="lesson-notes-details">
+    <details class="lesson-notes-details"${saved.notes||saved.saved_for_review?' open':''}>
       <summary>Add personal notes (optional)</summary>
-      <label>Confidence</label>
-      <select id="confidence"><option value="1">Need review</option><option value="2" selected>Getting it</option><option value="3">Strong</option></select>
-      <label>Notes</label>
-      <textarea id="notes" placeholder="Study notes..."></textarea>
+      <label for="confidence">Confidence</label>
+      <select id="confidence">${['Not rated','Need review','Getting it','Strong'].map((label,value)=>`<option value="${value}"${value===saved.confidence?' selected':''}>${label}</option>`).join('')}</select>
+      <label for="notes">Notes</label>
+      <textarea id="notes" maxlength="5000" placeholder="Study notes...">${esc(saved.notes||'')}</textarea>
+      <label class="lesson-review-label"><input type="checkbox" id="savedForReview"${saved.saved_for_review?' checked':''}> Save this lesson for review</label>
+      <button data-lesson-save onclick="saveLessonNotes(${l.id})">Save notes</button>
+      <span id="lessonSaveStatus" role="status" aria-live="polite"></span>
     </details>
     <div class="lesson-nav-bottom">${prevBtn}${nextBtn}</div>
     <div class="lesson-coach"><button onclick="quickAsk('Explain the lesson ${esc(l.title)} and give me one practice question.')">Ask Coverage Coach about this lesson</button></div>
   </article></div>`;
 }
-async function _saveLessonProgress(id){
-  await api('/api/lessons/'+id+'/progress',{method:'POST',body:JSON.stringify({
-    completed:true,
-    confidence:Number((document.getElementById('confidence')||{}).value||2),
-    notes:(document.getElementById('notes')||{}).value||'',
-    saved_for_review:false
-  })});
+async function _saveLessonProgress(id,completed){
+  if(lessonSavePending)return false;
+  const notes=document.getElementById('notes');
+  if(!notes)return false;
+  const payload={
+    confidence:Number(document.getElementById('confidence').value),
+    notes:notes.value,
+    saved_for_review:document.getElementById('savedForReview').checked
+  };
+  if(completed!==undefined)payload.completed=completed;
+  lessonSavePending=true;
+  const buttons=[...document.querySelectorAll('[data-lesson-save]')];
+  const status=document.getElementById('lessonSaveStatus');
+  buttons.forEach(b=>b.disabled=true);
+  if(status)status.textContent='Saving…';
+  try{
+    await api('/api/lessons/'+id+'/progress',{method:'POST',body:JSON.stringify(payload)});
+    if(status)status.textContent='Saved';
+    return true;
+  }catch(e){
+    if(status)status.textContent='Could not save. Your notes are still here; please try again.';
+    return false;
+  }finally{lessonSavePending=false;buttons.forEach(b=>b.disabled=false);}
 }
-async function completeAndAdvance(id,nextSlug){await _saveLessonProgress(id);route('lesson',nextSlug);}
-async function completeAndDone(id){await _saveLessonProgress(id);toast('Module complete!');showDashboard();}
-async function terms(){
-  const rows=await api('/api/terms');
+async function saveLessonNotes(id){await _saveLessonProgress(id);}
+async function completeAndAdvance(id,nextSlug){if(await _saveLessonProgress(id,true))await route('lesson',nextSlug);}
+async function completeAndDone(id){if(await _saveLessonProgress(id,true)){toast('Lesson complete!');await route('dashboard');}}
+async function terms(moduleSlug){
+  const rows=await api('/api/terms'+(moduleSlug?'?module_slug='+encodeURIComponent(moduleSlug):''));
   if(!rows.length){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Dashboard</button><p>No flashcards yet.</p></div></div>`;return;}
-  flashcardIndex=0;flashcardFlipped=false;renderFlashcard(rows);
+  flashcardRows=rows;flashcardIndex=0;flashcardFlipped=false;renderFlashcard();
 }
-function renderFlashcard(rows){
+function flipFlashcard(){flashcardFlipped=!flashcardFlipped;renderFlashcard();document.querySelector('.flashcard')?.focus();}
+function moveFlashcard(index){flashcardIndex=Math.max(0,Math.min(index,flashcardRows.length-1));flashcardFlipped=false;renderFlashcard();}
+function renderFlashcard(){
+  const rows=flashcardRows;
+  if(!rows.length)return;
   const t=rows[flashcardIndex];
   const progress=`${flashcardIndex+1} of ${rows.length}`;
   app.innerHTML=`<div class="page-wrap"><div class="card">
@@ -339,7 +381,7 @@ function renderFlashcard(rows){
         <div style="width:${((flashcardIndex+1)/rows.length*100)}%;height:100%;background:var(--accent);border-radius:3px"></div>
       </div>
     </div>
-    <div class="flashcard" onclick="flashcardFlipped=!flashcardFlipped;renderFlashcard(rows)" style="cursor:pointer;min-height:200px;padding:2rem;background:var(--surface);border:2px solid var(--border);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transition:all .2s">
+    <div class="flashcard" role="button" tabindex="0" aria-label="${flashcardFlipped?'Show term':'Reveal definition'}" onclick="flipFlashcard()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();flipFlashcard()}" style="cursor:pointer;min-height:200px;padding:2rem;background:var(--surface);border:2px solid var(--border);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transition:all .2s">
       ${!flashcardFlipped
         ?`<div class="pill" style="margin-bottom:1rem">${esc(t.term)}</div><p class="muted">Tap to reveal definition</p>`
         :`<p><strong>Plain English:</strong> ${esc(t.plain_english_definition)}</p>
@@ -348,41 +390,64 @@ function renderFlashcard(rows){
       }
     </div>
     <div class="toolbar" style="margin-top:1.5rem">
-      ${flashcardIndex>0?`<button onclick="flashcardIndex--;flashcardFlipped=false;renderFlashcard(rows)">← Prev</button>`:'<span></span>'}
+      ${flashcardIndex>0?`<button onclick="moveFlashcard(${flashcardIndex-1})">← Prev</button>`:'<span></span>'}
       ${flashcardIndex<rows.length-1
-        ?`<button class="primary" onclick="flashcardIndex++;flashcardFlipped=false;renderFlashcard(rows)">Next →</button>`
-        :`<button class="primary" onclick="flashcardIndex=0;flashcardFlipped=false;renderFlashcard(rows)">Start Over</button>`
+        ?`<button class="primary" onclick="moveFlashcard(${flashcardIndex+1})">Next →</button>`
+        :`<button class="primary" onclick="moveFlashcard(0)">Start Over</button>`
       }
     </div>
   </div></div>`;
 }
-async function quiz(moduleSlug){answers={};currentQuizIndex=0;currentQuestions=await api('/api/questions?limit=10'+(moduleSlug?'&module_slug='+encodeURIComponent(moduleSlug):''));renderQuiz()}
+async function quiz(moduleSlug,{mistakesOnly=false}={}){
+  app.classList.remove('ws-locked');
+  quizContext={moduleSlug:moduleSlug||null,mistakesOnly};
+  answers={};currentQuizIndex=0;currentQuestions=[];quizSubmitting=false;
+  app.innerHTML='<div class="page-wrap"><p role="status">Loading your questions…</p></div>';
+  try{
+    currentQuestions=await api('/api/questions?limit=10'+(moduleSlug?'&module_slug='+encodeURIComponent(moduleSlug):'')+(mistakesOnly?'&mistakes_only=true':''));
+    renderQuiz();
+  }catch(e){
+    app.innerHTML='<div class="page-wrap"><div class="card"><h1>Could not load questions</h1><p>Please try again.</p><button onclick="restartQuiz()">Try again</button><button onclick="route(\'dashboard\')">Dashboard</button></div></div>';
+  }
+}
+async function practiceMistakes(){await quiz(null,{mistakesOnly:true});}
+async function restartQuiz(){await quiz(quizContext.moduleSlug,{mistakesOnly:quizContext.mistakesOnly});}
 function renderQuiz(results=null){
   if(results){
-    const score=results.filter(r=>r.is_correct).length;
-    const total=results.length;
+    const resultsById=new Map(results.map(r=>[r.question.id,r]));
+    const orderedResults=currentQuestions.map(q=>resultsById.get(q.id)).filter(Boolean);
+    const score=orderedResults.filter(r=>r.is_correct).length;
+    const total=orderedResults.length;
+    if(!total){toast('No quiz results returned. Please try again.');return;}
     const pct=Math.round(score/total*100);
     app.innerHTML=`<div class="page-wrap"><div class="card">
       <button onclick="route('dashboard')">← Dashboard</button>
       <h1>Quiz Results</h1>
       <div class="quiz-score" style="font-size:2rem;font-weight:700;margin:1rem 0;color:${pct>=70?'#10b981':'#ef4444'}">${pct}% — ${score}/${total} correct</div>
-      <div class="list">${results.map((r,i)=>{
-        const q=currentQuestions[i];
+      <div class="list">${orderedResults.map(r=>{
+        const q=r.question;
+        const displayed=currentQuestions.find(item=>item.id===q.id);
+        const choicesById=new Map(q.choices.map(c=>[c.id,c]));
+        const choices=displayed.choices.map(c=>choicesById.get(c.id)).filter(Boolean);
         return `<div class="card" style="border-left:4px solid ${r.is_correct?'#10b981':'#ef4444'}">
           <div class="eyebrow">${r.is_correct?'✓ Correct':'✗ Incorrect'}</div>
           <p><strong>${esc(q.question_text)}</strong></p>
-          <p class="muted">${esc(r.question?.explanation||'')}</p>
+          <ul class="quiz-answer-review">${choices.map(c=>`<li class="${c.is_correct?'answer-correct':''}"><strong>${esc(c.choice_text)}</strong>${c.id===r.selected_choice_id?' <span>(Your answer)</span>':''}${c.is_correct?' <span>✓ Correct answer</span>':''}${c.explanation?`<p>${esc(c.explanation)}</p>`:''}</li>`).join('')}</ul>
+          <p class="muted">${esc(q.explanation||'')}</p>
         </div>`;
       }).join('')}</div>
       <div class="toolbar">
-        <button class="primary" onclick="quiz()">New Quiz</button>
+        <button class="primary" onclick="restartQuiz()">${quizContext.mistakesOnly?'Continue mistake review':'New Quiz'}</button>
         <button onclick="route('dashboard')">Dashboard</button>
       </div>
     </div></div>`;
     return;
   }
   const q=currentQuestions[currentQuizIndex];
-  if(!q)return;
+  if(!q){
+    app.innerHTML=`<div class="page-wrap"><div class="card"><h1>${quizContext.mistakesOnly?'Mistake review':'Practice quiz'}</h1><p>${quizContext.mistakesOnly?'You have no mistakes to review in this course and state.':'No practice questions are available for this selection yet.'}</p><button onclick="route('dashboard')">Back to dashboard</button></div></div>`;
+    return;
+  }
   const progress=`${currentQuizIndex+1} of ${currentQuestions.length}`;
   app.innerHTML=`<div class="page-wrap"><div class="card">
     <button onclick="route('dashboard')">← Dashboard</button>
@@ -394,23 +459,34 @@ function renderQuiz(results=null){
     </div>
     <h3 style="margin-bottom:1.5rem">${esc(q.question_text)}</h3>
     <div class="choices">${q.choices.map(c=>`
-      <div class="choice${answers[q.id]===c.id?' selected':''}" onclick="answers[${q.id}]=${c.id};renderQuiz()">
+      <button type="button" class="choice${answers[q.id]===c.id?' selected':''}" aria-pressed="${answers[q.id]===c.id}" onclick="answers[${q.id}]=${c.id};renderQuiz()">
         ${esc(c.choice_text)}
-      </div>`).join('')}
+      </button>`).join('')}
     </div>
     <div class="toolbar" style="margin-top:1.5rem">
       ${currentQuizIndex>0?`<button onclick="currentQuizIndex--;renderQuiz()">← Back</button>`:''}
       ${answers[q.id]!=null
         ?currentQuizIndex<currentQuestions.length-1
           ?`<button class="primary" onclick="currentQuizIndex++;renderQuiz()">Next →</button>`
-          :`<button class="primary" onclick="submitQuiz()">Submit Quiz</button>`
+          :`<button id="submitQuizButton" class="primary" onclick="submitQuiz()">Submit Quiz</button>`
         :`<button class="primary" disabled>Select an answer</button>`
       }
     </div>
   </div></div>`;
 }
 let lastResults=null;
-async function submitQuiz(){const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:'practice',answers})});lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%')}
+async function submitQuiz(){
+  if(quizSubmitting)return;
+  if(!currentQuestions.length||currentQuestions.some(q=>!q.choices.some(c=>c.id===answers[q.id]))){toast('Answer every question before submitting.');return;}
+  quizSubmitting=true;
+  const button=document.getElementById('submitQuizButton');
+  if(button){button.disabled=true;button.textContent='Submitting…';}
+  try{
+    const out=await api('/api/quiz/submit',{method:'POST',body:JSON.stringify({mode:quizContext.mistakesOnly?'mistakes':'practice',answers})});
+    lastResults=out.results;renderQuiz(lastResults);toast('Score: '+out.score+'%');
+  }catch(e){toast('Could not submit. Your answers are still here; please try again.');}
+  finally{quizSubmitting=false;if(button){button.disabled=false;button.textContent='Submit Quiz';}}
+}
 function logout(){
   if(!confirm('Reset your progress? This clears your saved study data on this browser.')) return;
   localStorage.removeItem('wit_anon_id');
@@ -427,7 +503,7 @@ async function showDashboard(){app.classList.remove('ws-locked');
   }
   const {readiness,lessons,quizzes,mistakes,modules:mods,recommendations:recs,user:uname}=d;
   const ringColor=readiness>=80?'#10b981':readiness>=60?'#f59e0b':'#ef4444';
-  const ringLabel=readiness>=80?'✓ Exam Ready':readiness>=60?'↑ Getting There':'⚡ Keep Studying';
+  const ringLabel=readiness>=80?'✓ Strong progress':readiness>=60?'↑ Making progress':'⚡ Keep studying';
   const circ=(2*Math.PI*40);
   const dash=(circ*readiness/100).toFixed(1);
   const ring=`<svg class="dash-ring-svg" viewBox="0 0 100 100">
@@ -436,7 +512,7 @@ async function showDashboard(){app.classList.remove('ws-locked');
       stroke-dasharray="${dash} ${circ.toFixed(1)}" stroke-linecap="round"
       transform="rotate(-90 50 50)" style="transition:stroke-dasharray .6s"/>
     <text x="50" y="46" text-anchor="middle" font-size="20" font-weight="700" fill="${ringColor}">${readiness}%</text>
-    <text x="50" y="62" text-anchor="middle" font-size="7" fill="var(--text-muted)">Readiness</text>
+    <text x="50" y="62" text-anchor="middle" font-size="7" fill="var(--text-muted)">Study progress</text>
   </svg>`;
   const bars=quizzes.recent.length
     ?quizzes.recent.slice().reverse().map(q=>{
@@ -510,7 +586,7 @@ async function showDashboard(){app.classList.remove('ws-locked');
         <section class="dash-card dash-half">
           <h2 class="dash-section-title">Mistake Bank <span class="dash-pill">${mistakes.count}</span></h2>
           <ul class="dash-mistake-list">${mistakeItems}</ul>
-          ${mistakes.count>5?'<button class="ghost" onclick="route(\'quiz\')">Practice all mistakes →</button>':''}
+          ${mistakes.count>0?'<button class="ghost" onclick="practiceMistakes()">Practice missed questions →</button>':''}
         </section>
         ${recCards?`<section class="dash-card dash-half">
           <h2 class="dash-section-title">Up Next</h2>

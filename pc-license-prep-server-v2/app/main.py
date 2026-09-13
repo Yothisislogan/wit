@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import random
 from contextlib import asynccontextmanager
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -18,6 +19,7 @@ from .content_loader import seed_course_if_empty
 from .database import SessionLocal, create_all, get_db
 from .models import AnswerChoice, Lesson, LessonProgress, MistakeBank, Module, Question, QuizAnswer, QuizAttempt, Term, User
 from .settings import settings
+from .study_scope import module_scope
 from .tutor import ask_coverage_coach
 
 FRONTEND_DIR = __import__("pathlib").Path(__file__).resolve().parent.parent / "frontend"
@@ -151,7 +153,7 @@ def module_out(module: Module) -> dict[str, Any]:
         "title": module.title,
         "description": module.description,
         "sort_order": module.sort_order,
-        "lesson_count": len(module.lessons),
+        "lesson_count": sum(1 for lesson in module.lessons if lesson.is_active),
     }
 
 
@@ -172,6 +174,9 @@ def lesson_out(lesson: Lesson) -> dict[str, Any]:
 
 
 def question_out(question: Question, include_answer: bool = False) -> dict[str, Any]:
+    choices = list(question.choices)
+    if not include_answer:
+        random.shuffle(choices)
     data = {
         "id": question.id,
         "module_id": question.module_id,
@@ -184,10 +189,10 @@ def question_out(question: Question, include_answer: bool = False) -> dict[str, 
                 "id": c.id,
                 "choice_text": c.choice_text,
                 "explanation": c.explanation if include_answer else "",
-                "sort_order": c.sort_order,
+                "sort_order": position,
                 **({"is_correct": c.is_correct} if include_answer else {}),
             }
-            for c in question.choices
+            for position, c in enumerate(choices)
         ],
         "explanation": question.explanation if include_answer else "",
     }
@@ -275,39 +280,38 @@ def state_info(state_abbr: str):
 
 
 @app.get("/api/modules")
-def list_modules(request: Request, course: str | None = Query(None), db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not course and user_id:
-        u = db.get(User, int(user_id))
-        course = getattr(u, "course", "pc") if u else "pc"
-    stmt = select(Module).options(selectinload(Module.lessons)).where(Module.is_active == True)
-    if course:
-        stmt = stmt.where(Module.course == course)
+def list_modules(request: Request, course: Literal["pc", "lh"] | None = Query(None), db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    stmt = select(Module).options(selectinload(Module.lessons)).where(module_scope(user, course))
     stmt = stmt.order_by(Module.sort_order, Module.id)
     modules = db.scalars(stmt).all()
     return [module_out(m) for m in modules]
 
 
 @app.get("/api/modules/{slug}")
-def get_module(slug: str, db: Session = Depends(get_db)):
-    module = db.scalar(select(Module).options(selectinload(Module.lessons)).where(Module.slug == slug, Module.is_active == True))
+def get_module(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    module = db.scalar(select(Module).options(selectinload(Module.lessons)).where(Module.slug == slug, module_scope(user)))
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     return {**module_out(module), "lessons": [lesson_out(l) for l in module.lessons if l.is_active]}
 
 
 @app.get("/api/lessons/{slug}")
-def get_lesson(slug: str, db: Session = Depends(get_db)):
-    lesson = db.scalar(select(Lesson).where(Lesson.slug == slug, Lesson.is_active == True))
+def get_lesson(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    lesson = db.scalar(select(Lesson).join(Module).where(Lesson.slug == slug, Lesson.is_active == True, module_scope(user)))
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     terms = db.scalars(select(Term).where(Term.module_id == lesson.module_id).order_by(Term.term)).all()
     module = db.scalar(select(Module).where(Module.id == lesson.module_id))
+    saved = db.scalar(select(LessonProgress).where(LessonProgress.user_id == user.id, LessonProgress.lesson_id == lesson.id))
     return {
         **lesson_out(lesson),
         "module_slug": module.slug if module else "",
         "module_title": module.title if module else "",
         "terms": [term_out(t) for t in terms],
+        "progress": lesson_progress_out(saved, lesson.id),
     }
 
 
@@ -324,19 +328,25 @@ def term_out(term: Term) -> dict[str, Any]:
 
 
 @app.get("/api/terms")
-def list_terms(module_slug: str | None = None, db: Session = Depends(get_db)):
-    stmt = select(Term).order_by(Term.term)
+def list_terms(request: Request, module_slug: str | None = None, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    stmt = select(Term).join(Module).where(module_scope(user)).order_by(Term.term)
     if module_slug:
-        stmt = stmt.join(Module).where(Module.slug == module_slug)
+        stmt = stmt.where(Module.slug == module_slug)
     return [term_out(t) for t in db.scalars(stmt).all()]
 
 
 @app.get("/api/questions")
-def list_questions(module_slug: str | None = None, limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)):
-    stmt = select(Question).options(selectinload(Question.choices)).where(Question.is_active == True)
+def list_questions(request: Request, module_slug: str | None = None, limit: int = Query(10, ge=1, le=50), mistakes_only: bool = False, db: Session = Depends(get_db)):
+    user = require_user(request, db)
+    stmt = select(Question).join(Module).options(selectinload(Question.choices)).where(Question.is_active == True, module_scope(user))
     if module_slug:
-        stmt = stmt.join(Module).where(Module.slug == module_slug)
+        stmt = stmt.where(Module.slug == module_slug)
+    if mistakes_only:
+        stmt = stmt.join(MistakeBank).where(MistakeBank.user_id == user.id, MistakeBank.mastered_at.is_(None))
     questions = list(db.scalars(stmt).all())
+    # An incomplete content import should never serve an unanswerable question.
+    questions = [q for q in questions if len(q.choices) >= 2 and sum(bool(c.is_correct) for c in q.choices) == 1]
     random.shuffle(questions)
     return [question_out(q) for q in questions[:limit]]
 
@@ -344,8 +354,8 @@ def list_questions(module_slug: str | None = None, limit: int = Query(10, ge=1, 
 @app.post("/api/quiz/submit")
 def submit_quiz(payload: QuizSubmitIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
-    if len(payload.answers) > 50:
-        raise HTTPException(status_code=400, detail="Submit 50 answers or fewer at a time")
+    if not 1 <= len(payload.answers) <= 50:
+        raise HTTPException(status_code=400, detail="Submit between 1 and 50 answers at a time")
 
     attempt = QuizAttempt(user_id=user.id, mode=payload.mode, total_questions=len(payload.answers))
     db.add(attempt)
@@ -354,20 +364,26 @@ def submit_quiz(payload: QuizSubmitIn, request: Request, db: Session = Depends(g
     correct_count = 0
     results = []
     for question_id, choice_id in payload.answers.items():
-        question = db.scalar(select(Question).options(selectinload(Question.choices)).where(Question.id == question_id))
+        question = db.scalar(select(Question).join(Module).options(selectinload(Question.choices)).where(Question.id == question_id, Question.is_active == True, module_scope(user)))
         choice = db.get(AnswerChoice, choice_id)
         if not question or not choice or choice.question_id != question.id:
             raise HTTPException(status_code=400, detail="Invalid question or answer choice")
+        if len(question.choices) < 2 or sum(bool(c.is_correct) for c in question.choices) != 1:
+            raise HTTPException(status_code=400, detail="This question is unavailable. Please start a new quiz.")
         is_correct = bool(choice.is_correct)
         correct_count += 1 if is_correct else 0
         db.add(QuizAnswer(attempt_id=attempt.id, question_id=question.id, selected_choice_id=choice.id, is_correct=is_correct))
+        mistake = db.scalar(select(MistakeBank).where(MistakeBank.user_id == user.id, MistakeBank.question_id == question.id))
         if not is_correct:
-            mistake = db.scalar(select(MistakeBank).where(MistakeBank.user_id == user.id, MistakeBank.question_id == question.id))
             if mistake:
                 mistake.times_missed += 1
                 mistake.mastered_at = None
+                mistake.last_missed_at = datetime.now(timezone.utc)
             else:
                 db.add(MistakeBank(user_id=user.id, question_id=question.id, times_missed=1))
+        elif mistake:
+            # Keep history, but remove a corrected answer from the active queue.
+            mistake.mastered_at = datetime.now(timezone.utc)
         results.append({"question": question_out(question, include_answer=True), "selected_choice_id": choice.id, "is_correct": is_correct})
 
     attempt.score = round(correct_count / max(len(payload.answers), 1) * 100)
@@ -375,53 +391,66 @@ def submit_quiz(payload: QuizSubmitIn, request: Request, db: Session = Depends(g
     return {"attempt_id": attempt.id, "score": attempt.score, "correct": correct_count, "total": len(payload.answers), "results": results}
 
 
+def lesson_progress_out(row: LessonProgress | None, lesson_id: int) -> dict[str, Any]:
+    return {
+        "lesson_id": lesson_id,
+        "completed": row.completed if row else False,
+        "confidence": row.confidence if row else 0,
+        "notes": row.notes if row else "",
+        "saved_for_review": row.saved_for_review if row else False,
+    }
+
+
+def scoped_progress(user: User):
+    return select(LessonProgress).join(Lesson).join(Module).where(
+        LessonProgress.user_id == user.id, Lesson.is_active == True, module_scope(user)
+    )
+
+
+def scoped_mistakes(user: User):
+    return select(MistakeBank).join(Question).join(Module).where(
+        MistakeBank.user_id == user.id, MistakeBank.mastered_at.is_(None),
+        Question.is_active == True, module_scope(user)
+    )
+
+
 @app.get("/api/progress")
 def progress(request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
-    total_lessons = db.scalar(select(func.count()).select_from(Lesson).where(Lesson.is_active == True)) or 0
-    progress_rows = db.scalars(select(LessonProgress).where(LessonProgress.user_id == user.id)).all()
+    total_lessons = db.scalar(select(func.count()).select_from(Lesson).join(Module).where(Lesson.is_active == True, module_scope(user))) or 0
+    progress_rows = db.scalars(scoped_progress(user)).all()
     completed = sum(1 for p in progress_rows if p.completed)
-    mistakes = db.scalar(select(func.count()).select_from(MistakeBank).where(MistakeBank.user_id == user.id)) or 0
+    mistakes = db.scalar(select(func.count()).select_from(scoped_mistakes(user).subquery())) or 0
     return {
         "total_lessons": total_lessons,
         "completed_lessons": completed,
         "percent_complete": round(completed / max(total_lessons, 1) * 100),
         "mistake_count": mistakes,
-        "items": [
-            {
-                "lesson_id": p.lesson_id,
-                "completed": p.completed,
-                "confidence": p.confidence,
-                "notes": p.notes,
-                "saved_for_review": p.saved_for_review,
-            }
-            for p in progress_rows
-        ],
+        "items": [lesson_progress_out(p, p.lesson_id) for p in progress_rows],
     }
 
 
 @app.post("/api/lessons/{lesson_id}/progress")
 def save_lesson_progress(lesson_id: int, payload: LessonProgressIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
-    lesson = db.get(Lesson, lesson_id)
+    lesson = db.scalar(select(Lesson).join(Module).where(Lesson.id == lesson_id, Lesson.is_active == True, module_scope(user)))
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     row = db.scalar(select(LessonProgress).where(LessonProgress.user_id == user.id, LessonProgress.lesson_id == lesson.id))
     if not row:
-        row = LessonProgress(user_id=user.id, lesson_id=lesson.id)
+        row = LessonProgress(user_id=user.id, lesson_id=lesson.id, completed=False, confidence=0, notes="", saved_for_review=False)
         db.add(row)
-    row.completed = payload.completed
-    row.confidence = payload.confidence
-    row.notes = payload.notes
-    row.saved_for_review = payload.saved_for_review
+    # Omitted fields must not erase notes or change completion on a partial save.
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, field, value)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "progress": lesson_progress_out(row, lesson.id)}
 
 
 @app.get("/api/mistakes")
 def mistake_bank(request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
-    rows = db.scalars(select(MistakeBank).options(selectinload(MistakeBank.question).selectinload(Question.choices)).where(MistakeBank.user_id == user.id).order_by(MistakeBank.times_missed.desc())).all()
+    rows = db.scalars(scoped_mistakes(user).options(selectinload(MistakeBank.question).selectinload(Question.choices)).order_by(MistakeBank.times_missed.desc())).all()
     return [
         {
             "id": m.id,
@@ -445,7 +474,7 @@ class StudioIn(BaseModel):
 @app.post("/api/studio/generate")
 def studio_generate(payload: StudioIn, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
-    module = db.scalars(select(Module).where(Module.slug == payload.module_slug)).first()
+    module = db.scalars(select(Module).where(Module.slug == payload.module_slug, module_scope(user))).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     lessons = db.scalars(select(Lesson).where(Lesson.module_id == module.id, Lesson.is_active == True).order_by(Lesson.sort_order)).all()
@@ -520,25 +549,23 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     """Aggregated progress data for the dashboard view."""
     user = require_user(request, db)
 
-    course = user.course or "pc"
-
     # ── Lesson completion ────────────────────────────────────────────
     total_lessons = (
         db.scalar(
             select(func.count()).select_from(Lesson)
             .join(Module, Module.id == Lesson.module_id)
-            .where(Lesson.is_active == True, Module.course == course)
+            .where(Lesson.is_active == True, module_scope(user))
         ) or 0
     )
     progress_rows = db.scalars(
-        select(LessonProgress).where(LessonProgress.user_id == user.id)
+        scoped_progress(user)
     ).all()
     completed_ids = {p.lesson_id for p in progress_rows if p.completed}
 
     # ── Module breakdown + recommendations ──────────────────────────
     modules = db.scalars(
         select(Module)
-        .where(Module.is_active == True, Module.course == course)
+        .where(module_scope(user))
         .options(selectinload(Module.lessons))
         .order_by(Module.sort_order)
     ).all()
@@ -570,27 +597,41 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
                     break
 
     # ── Quiz history ─────────────────────────────────────────────────
-    recent_attempts = db.scalars(
-        select(QuizAttempt)
-        .where(QuizAttempt.user_id == user.id)
-        .order_by(QuizAttempt.created_at.desc())
-        .limit(10)
-    ).all()
+    # Old attempts may mix courses/states. Calculate history from only the
+    # answers belonging to the current selection instead of their stored score.
+    attempt_query = (
+        select(
+            QuizAttempt.id,
+            QuizAttempt.created_at,
+            func.count(QuizAnswer.id).label("total"),
+            func.sum(case((QuizAnswer.is_correct.is_(True), 1), else_=0)).label("correct"),
+        )
+        .join(QuizAnswer, QuizAnswer.attempt_id == QuizAttempt.id)
+        .join(Question, Question.id == QuizAnswer.question_id)
+        .join(Module, Module.id == Question.module_id)
+        .where(QuizAttempt.user_id == user.id, Question.is_active == True, module_scope(user))
+        .group_by(QuizAttempt.id, QuizAttempt.created_at)
+    )
+    total_attempts = db.scalar(select(func.count()).select_from(attempt_query.subquery())) or 0
+    recent_attempts = [
+        {"score": round(row.correct / row.total * 100), "total": row.total,
+         "date": row.created_at.isoformat() if row.created_at else None}
+        for row in db.execute(attempt_query.order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc()).limit(10))
+    ]
     avg_quiz = (
-        round(sum(a.score for a in recent_attempts) / len(recent_attempts))
+        round(sum(a["score"] for a in recent_attempts) / len(recent_attempts))
         if recent_attempts else 0
     )
 
     # ── Mistake bank ─────────────────────────────────────────────────
     mistake_count = (
         db.scalar(
-            select(func.count()).select_from(MistakeBank).where(MistakeBank.user_id == user.id)
+            select(func.count()).select_from(scoped_mistakes(user).subquery())
         ) or 0
     )
     top_mistakes = db.scalars(
-        select(MistakeBank)
+        scoped_mistakes(user)
         .options(selectinload(MistakeBank.question))
-        .where(MistakeBank.user_id == user.id)
         .order_by(MistakeBank.times_missed.desc())
         .limit(5)
     ).all()
@@ -609,16 +650,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "pct": lesson_pct,
         },
         "quizzes": {
-            "total_taken": len(recent_attempts),
+            "total_taken": total_attempts,
             "avg_score": avg_quiz,
-            "recent": [
-                {
-                    "score": a.score,
-                    "total": a.total_questions,
-                    "date": a.created_at.isoformat() if a.created_at else None,
-                }
-                for a in recent_attempts[:8]
-            ],
+            "recent": recent_attempts[:8],
         },
         "mistakes": {
             "count": mistake_count,
