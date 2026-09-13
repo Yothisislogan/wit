@@ -209,3 +209,12 @@ button.ghost{background:#fff;border:1px solid var(--line);color:#2d3135}
 .quiz-answer-review li { margin: .8rem 0; }
 .quiz-answer-review p { margin: .25rem 0; }
 .quiz-answer-review .answer-correct { border-left: 3px solid #10b981; padding-left: .6rem; }
+
+.exam-grid { display:flex; flex-wrap:wrap; gap:.35rem; margin:1rem 0; }
+.exam-grid button { min-width:2.6rem; padding:.45rem; }
+.exam-grid .active { outline:2px solid var(--accent, #3c9278); }
+.exam-choices { display:grid; gap:.6rem; margin:1rem 0; }
+.exam-choices button { text-align:left; padding:1rem; white-space:normal; }
+.exam-choices .selected { outline:2px solid var(--accent, #3c9278); }
+.exam-result { border-top:1px solid #8885; padding:1rem 0; }
+.exam-result summary { cursor:pointer; }

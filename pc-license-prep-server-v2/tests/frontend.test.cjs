@@ -14,6 +14,8 @@ function harness() {
   const context = vm.createContext({
     console,
     setTimeout() {},
+    setInterval() {},
+    clearInterval() {},
     document: {
       getElementById: id => nodes.get(id) || null,
       querySelector: () => ({focus() {}}),
@@ -139,4 +141,40 @@ test('navigation catches asynchronous request failures', async () => {
   await h.run("route('lesson','missing')");
   assert.match(h.app.innerHTML, /Something went wrong/);
   assert.match(h.app.innerHTML, /Back to dashboard/);
+});
+
+test('state profiles distinguish separate exams and scaled scores from percentages', () => {
+  const h=harness();
+  assert.equal(h.run("examProfileSummary({profiles:[]},'pc')"),'Exam format awaiting verification');
+  const summary=h.run(`examProfileSummary({reviewed_at:'2026-09-13',profiles:[{name:'Property',course:'pc',scored_questions:55,pretest_questions_max:5,duration_minutes:75,passing_score:70}]},'pc')`);
+  assert.match(summary,/55 scored.*75 min.*scaled score 70/);
+  assert.doesNotMatch(summary,/%/);
+});
+
+function examFixture(h){
+  h.run(`timedExam={id:'exam-1',course:'pc',status:'in_progress',revision:0,server_now:new Date().toISOString(),deadline_at:new Date(Date.now()+60000).toISOString(),answers:{},flagged:[],total_questions:1,questions:[{id:42,question_text:'Question <safe>',choices:[{id:421,choice_text:'Option'}]}]}`);
+  for(const id of ['examTimer','timedSaveStatus','timedError','timedFinishReview'])h.nodes.set(id,h.makeNode());
+}
+
+test('timed practice saves stable IDs and locks controls while saving', async () => {
+  const h=harness();examFixture(h);
+  let resolve;let calls=0;
+  h.context.api=(url,opts)=>{calls++;assert.equal(url,'/api/exams/exam-1/answers');assert.deepEqual(JSON.parse(opts.body).answers,{'42':421});return new Promise(r=>resolve=r)};
+  const pending=h.run('saveTimedAnswer(42,421)');
+  assert.match(h.app.innerHTML,/Saving/);
+  await h.run('saveTimedAnswer(42,421)');assert.equal(calls,1);
+  const response=JSON.parse(h.run('JSON.stringify(timedExam)'));response.revision=1;response.answers={'42':421};resolve(response);
+  await pending;
+  assert.equal(h.run('timedExam.answers[42]'),421);
+  assert.match(h.app.innerHTML,/aria-pressed="true"/);
+  assert.match(h.app.innerHTML,/Question &lt;safe&gt;/);
+});
+
+test('failed timed save retains server-confirmed answers and offers reload', async () => {
+  const h=harness();examFixture(h);
+  h.context.api=async()=>{throw new Error('offline')};
+  await h.run('saveTimedAnswer(42,421)');
+  assert.equal(h.run('Object.keys(timedExam.answers).length'),0);
+  assert.match(h.nodes.get('timedSaveStatus').textContent,/not confirmed/);
+  assert.match(h.nodes.get('timedError').innerHTML,/Reload saved answers/);
 });

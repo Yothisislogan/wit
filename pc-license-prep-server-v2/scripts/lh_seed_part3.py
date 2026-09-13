@@ -265,96 +265,9 @@ MODULES = [
 
 
 def seed_part3():
-    create_all()
-    db = SessionLocal()
-    try:
-        mod_count = lesson_count = term_count = q_count = 0
-
-        for mod_data in MODULES:
-            existing = db.scalar(select(Module).where(Module.slug == mod_data["slug"]))
-            if existing:
-                print(f"  SKIP (exists): {mod_data['slug']}")
-                continue
-
-            mod = Module(
-                slug=mod_data["slug"],
-                title=mod_data["title"],
-                description=mod_data["description"],
-                sort_order=mod_data["sort_order"],
-                is_active=True,
-            )
-            db.add(mod)
-            db.flush()
-            db.execute(text("UPDATE modules SET course='lh' WHERE id=:id"), {"id": mod.id})
-            mod_count += 1
-            print(f"  MODULE: {mod.title}")
-
-            for i, ld in enumerate(mod_data["lessons"], 1):
-                db.add(Lesson(
-                    module_id=mod.id, slug=ld["slug"], title=ld["title"],
-                    summary=ld.get("summary", ""), body=ld.get("body", ""),
-                    example=ld.get("example", ""), memory_tip=ld.get("memory_tip", ""),
-                    audio_script="", estimated_minutes=ld.get("estimated_minutes", 7),
-                    sort_order=ld.get("sort_order", i), is_active=True,
-                ))
-                lesson_count += 1
-
-            for td in mod_data["terms"]:
-                db.add(Term(
-                    module_id=mod.id, lesson_id=None,
-                    term=td["term"],
-                    plain_english_definition=td["plain"],
-                    exam_definition=td["exam"],
-                    example=td["example"],
-                ))
-                term_count += 1
-
-            db.flush()
-
-            lessons = db.scalars(
-                select(Lesson).where(Lesson.module_id == mod.id).order_by(Lesson.sort_order)
-            ).all()
-            first_lesson_id = lessons[0].id if lessons else None
-
-            for q_text, q_type, difficulty, explanation, choices in mod_data["questions"]:
-                q = Question(
-                    module_id=mod.id, lesson_id=first_lesson_id,
-                    question_text=q_text, question_type=q_type,
-                    difficulty=difficulty, explanation=explanation, is_active=True,
-                )
-                db.add(q)
-                db.flush()
-                for sort_i, (ct, correct, ce) in enumerate(choices, 1):
-                    db.add(AnswerChoice(
-                        question_id=q.id, choice_text=ct,
-                        is_correct=correct, explanation=ce, sort_order=sort_i,
-                    ))
-                q_count += 1
-
-        db.commit()
-        print(f"\n=== Part 3 complete: {mod_count} modules, {lesson_count} lessons, {term_count} terms, {q_count} questions ===")
-
-        # Final summary across all LH modules
-        total_lh = db.execute(
-            text("SELECT COUNT(*) FROM modules WHERE course='lh'")
-        ).scalar()
-        total_lessons = db.execute(
-            text("SELECT COUNT(*) FROM lessons l JOIN modules m ON m.id=l.module_id WHERE m.course='lh'")
-        ).scalar()
-        total_terms = db.execute(
-            text("SELECT COUNT(*) FROM terms t JOIN modules m ON m.id=t.module_id WHERE m.course='lh'")
-        ).scalar()
-        total_q = db.execute(
-            text("SELECT COUNT(*) FROM questions q JOIN modules m ON m.id=q.module_id WHERE m.course='lh'")
-        ).scalar()
-        print(f"\n=== FULL L&H COURSE TOTALS ===")
-        print(f"Modules:   {total_lh}")
-        print(f"Lessons:   {total_lessons}")
-        print(f"Terms:     {total_terms}")
-        print(f"Questions: {total_q}")
-
-    finally:
-        db.close()
+    """Compatibility entry point: all imports use the non-destructive catalog."""
+    from scripts.sync_content import apply_content
+    apply_content()
 
 
 if __name__ == "__main__":

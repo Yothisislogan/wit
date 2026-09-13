@@ -1125,65 +1125,9 @@ GAP_MODULES = [
 
 
 def seed():
-    create_all()
-    db = SessionLocal()
-    try:
-        total_mods = total_q = 0
-
-        for mod_def in GAP_MODULES:
-            existing = db.scalar(
-                select(Module).where(Module.slug == mod_def["slug"]))
-            if existing:
-                print(f"  SKIP (exists): {mod_def['slug']}")
-                continue
-
-            mod = Module(
-                slug=mod_def["slug"],
-                title=mod_def["title"],
-                description=mod_def["description"],
-                sort_order=mod_def["sort_order"],
-                is_active=True,
-            )
-            db.add(mod)
-            db.flush()
-            db.execute(
-                text("UPDATE modules SET course=:c WHERE id=:id"),
-                {"c": mod_def["course"], "id": mod.id})
-            total_mods += 1
-            print(f"  MODULE: {mod.title} ({mod_def['course'].upper()})")
-
-            for (q_text, q_type, difficulty, explanation, choices) in mod_def["questions"]:
-                q = Question(
-                    module_id=mod.id,
-                    lesson_id=None,
-                    question_text=q_text,
-                    question_type=q_type,
-                    difficulty=difficulty,
-                    explanation=explanation,
-                    is_active=True,
-                )
-                db.add(q)
-                db.flush()
-                for sort_i, (ct, correct, ce) in enumerate(choices, 1):
-                    db.add(AnswerChoice(
-                        question_id=q.id,
-                        choice_text=ct,
-                        is_correct=correct,
-                        explanation=ce,
-                        sort_order=sort_i,
-                    ))
-                total_q += 1
-
-        db.commit()
-        print(f"\n=== Gap modules complete: {total_mods} modules, "
-              f"{total_q} questions ===")
-        print("Modules added:")
-        for m in GAP_MODULES:
-            print(f"  [{m['course'].upper()}] {m['title']} "
-                  f"({len(m['questions'])} questions)")
-
-    finally:
-        db.close()
+    """Compatibility entry point: all imports use the non-destructive catalog."""
+    from scripts.sync_content import apply_content
+    apply_content()
 
 
 if __name__ == "__main__":

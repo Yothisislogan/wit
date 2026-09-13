@@ -232,3 +232,21 @@ class CoachRateLimit(Base):
     window_day: Mapped[str] = mapped_column(String(12))    # "2026-06-19"
     hour_count: Mapped[int] = mapped_column(Integer, default=0)
     day_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+
+class TimedExam(Base):
+    __tablename__ = "timed_exams"
+    __table_args__ = (UniqueConstraint("user_id", "active_slot", name="uq_active_timed_exam"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    active_slot: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    course: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    snapshot_json: Mapped[str] = mapped_column(Text)
+    answers_json: Mapped[str] = mapped_column(Text, default="{}")
+    flags_json: Mapped[str] = mapped_column(Text, default="[]")

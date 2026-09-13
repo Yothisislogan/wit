@@ -57,7 +57,7 @@ const _US_STATES=[['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkan
 function stateSelector(opts={}){
   const opts2=opts||{};
   const sel=_US_STATES.map(([a,n])=>`<option value="${a}"${me&&me.state===a?' selected':''}>${n}</option>`).join('');
-  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What state are you getting licensed in?</h1><p class="course-sel-sub">We'll show your exam structure, vendor, and state-specific topics.</p><select id="stateDropdown" class="state-dropdown"><option value="">— Select your state —</option>${sel}</select><button class="primary" style="width:100%;margin-top:1rem" onclick="pickState()">Continue →</button><br><button class="ghost" style="margin-top:.5rem;font-size:.85rem;color:var(--muted)" onclick="${opts2.dashboard?'showDashboard()':'skipState()'}">Skip for now</button>${opts2.back?'<br><button class="ghost" style="margin-top:.25rem;font-size:.85rem" onclick="showDashboard()">← Back</button>':''}</div></div>`;
+  app.innerHTML=`<div class="course-sel-page"><div class="course-sel-card"><h1 class="course-sel-title">What state are you getting licensed in?</h1><p class="course-sel-sub">Choose your study jurisdiction. Verified exam details are shown where available.</p><select id="stateDropdown" class="state-dropdown"><option value="">— Select your state —</option>${sel}</select><button class="primary" style="width:100%;margin-top:1rem" onclick="pickState()">Continue →</button><br><button class="ghost" style="margin-top:.5rem;font-size:.85rem;color:var(--muted)" onclick="${opts2.dashboard?'showDashboard()':'skipState()'}">Skip for now</button>${opts2.back?'<br><button class="ghost" style="margin-top:.25rem;font-size:.85rem" onclick="showDashboard()">← Back</button>':''}</div></div>`;
 }
 async function pickState(){
   const val=document.getElementById('stateDropdown')?.value;
@@ -81,7 +81,7 @@ async function loginScreen(){
   }).join('');
   app.innerHTML=`<div class="login-page"><section class="login-card"><div class="login-logo">◈</div><h1 class="login-title">P&amp;C Prep Academy</h1><p class="login-sub">Sign in to track your progress toward your license</p><div class="login-btns">${providerBtns}</div><p class="login-fine">By signing in you agree to our <a href="/terms">Terms of Use</a> and <a href="/privacy">Privacy Policy</a>.</p></section></div>`;
 }
-async function route(name,arg){try{if(name!=='coach')app.classList.remove('ws-locked');if(name==='dashboard')return await showDashboard();if(name==='modules')return await showModules();if(name==='module')return await showModule(arg);if(name==='lesson')return await showLesson(arg);if(name==='terms')return await terms(arg);if(name==='quiz')return await quiz(arg);if(name==='coach')return await workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p><button onclick="route('dashboard')">Back to dashboard</button></div></div>`}}
+async function route(name,arg){try{if(name!=='coach')app.classList.remove('ws-locked');if(name==='dashboard')return await showDashboard();if(name==='modules')return await showModules();if(name==='module')return await showModule(arg);if(name==='lesson')return await showLesson(arg);if(name==='terms')return await terms(arg);if(name==='exam')return await timedExamSetup();if(name==='quiz')return await quiz(arg);if(name==='coach')return await workspace()}catch(e){app.innerHTML=`<div class="page-wrap"><div class="card"><h2>Something went wrong</h2><p>${esc(e.message)}</p><button onclick="route('dashboard')">Back to dashboard</button></div></div>`}}
 function sourcePanel(){const courseLabel=me&&me.course==='lh'?'Life & Health':'Property & Casualty';return `<aside class="pane"><div class="pane-head"><h2>Sources</h2><span class="course-badge" onclick="courseSelector()" title="Switch course" style="cursor:pointer;font-size:.75rem;padding:2px 8px;border-radius:12px;background:var(--accent-muted,#e8f0fe);color:var(--accent,#1a73e8);margin-left:8px">${esc(courseLabel)}</span><div class="pane-tools"><button class="icon-btn">▣</button></div></div><div class="pane-body"><button class="ghost" style="width:100%;font-size:1rem;margin-bottom:20px" onclick="route('modules')">＋ Add sources</button><div class="source-search"><input placeholder="Search the web for new sources"><div class="source-actions"><button>🌐 Web⌄</button><button>✦ Fast Research⌄</button><button class="icon-btn" style="margin-left:auto">⌕</button></div></div><div class="empty-state"><div><div class="big">▧</div><strong>Saved sources will appear here</strong><p>Click Add source above to add PDFs, websites, text, videos, or audio files. Or import a file directly from Google Drive.</p></div></div></div></aside>`}
 function chatPanel(){
   const intro = chatMessages.length === 0
@@ -120,7 +120,7 @@ function studioPanel(){
     <button class="studio-tile tile-cram"  onclick="studio('cram_sheet')"><span>⚡<br>Cram Sheet</span><b>›</b></button>
     <button class="studio-tile tile-map"   onclick="studio('concept_map')"><span>⌘<br>Concept Map</span><b>›</b></button>
     <button class="studio-tile tile-flash" onclick="route('terms',studioModuleSlug||undefined)"><span>▧<br>Flashcards</span><b>›</b></button>
-    <button class="studio-tile tile-exam"  onclick="route('quiz',studioModuleSlug||undefined)"><span>▢<br>Practice Quiz</span><b>›</b></button>
+    <button class="studio-tile tile-exam"  onclick="route('exam')"><span>▢<br>Timed Practice</span><b>›</b></button>
   </div>
   <div class="studio-output" id="studioOutput">
     <div class="studio-empty"><div class="spark">✦</div>
@@ -146,10 +146,10 @@ async function renderStateBanner(){
     let info=null;
     try{info=await api('/api/state-info/'+me.state)}catch(e){}
     if(info){
-      const exam=me.course==='lh'?info.lh_exam:info.pc_exam;
+
       const banner=document.createElement('div');
       banner.className='state-banner';
-      banner.innerHTML=`<span>📍 <strong>${esc(info.state_name)}</strong> · ${esc(info.vendor)} · ${exam.total_scored} questions · ${exam.passing_score}% to pass</span><button class="ghost" style="font-size:.8rem;padding:2px 8px" onclick="toggleStateTopics(this,${JSON.stringify(JSON.stringify(info.state_topics||[]))})">Topics ▾</button><button class="ghost" style="font-size:.8rem;padding:2px 8px" onclick="stateSelector({dashboard:true,back:true})">Change</button>`;
+      banner.innerHTML=`<span>📍 <strong>${esc(info.state_name)}</strong> · ${esc(info.vendor)} · ${esc(examProfileSummary(info,me.course))}</span>${info.outline_url?`<a href="${esc(info.outline_url)}" target="_blank" rel="noopener">Source handbook</a>`:''}<span class="muted">State-law content review pending</span><button class="ghost" style="font-size:.8rem;padding:2px 8px" onclick="stateSelector({dashboard:true,back:true})">Change</button>`;
       head.after(banner);
     }
   }else{
@@ -285,7 +285,7 @@ function answerQ(qi,ci){
   }
 }
 async function showModules(){app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Dashboard</button><h1>Your Course</h1><p class="muted">Study material for ${me&&me.course==='lh'?'Life & Health':'Property & Casualty'}${me&&me.state_name?' in '+esc(me.state_name):''}.</p><div class="grid">${modules.map(m=>`<div class="card"><div class="eyebrow">${m.lesson_count} lessons</div><h2>${esc(m.title)}</h2><p class="muted">${esc(m.description)}</p><button onclick="route('module','${m.slug}')">Open</button></div>`).join('')}</div></div></div>`}
-async function showModule(slug){const m=await api('/api/modules/'+slug);app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description)}</p><div class="list">${m.lessons.map(l=>`<div class="row"><div><strong>${esc(l.title)}</strong><br><span class="muted">${esc(l.summary)}</span></div><button onclick="route('lesson','${l.slug}')">Study</button></div>`).join('')}</div><div class="toolbar"><button onclick="route('quiz','${m.slug}')">Quiz This Module</button><button onclick="quickAsk('Explain the ${esc(m.title)} module and quiz me on it.')">Ask Coverage Coach</button></div></div></div>`}
+async function showModule(slug){const m=await api('/api/modules/'+slug);app.innerHTML=`<div class="page-wrap"><div class="card"><button onclick="route('dashboard')">← Workspace</button><h1>${esc(m.title)}</h1>${m.is_state_law?'<p>State-law material awaits review against current official sources.</p>':''}<p class="muted">${esc(m.description)}</p><div class="list">${m.lessons.map(l=>`<div class="row"><div><strong>${esc(l.title)}</strong><br><span class="muted">${esc(l.summary)}</span></div><button onclick="route('lesson','${l.slug}')">Study</button></div>`).join('')}</div><div class="toolbar"><button onclick="route('quiz','${m.slug}')">Quiz This Module</button><button onclick="quickAsk('Explain the ${esc(m.title)} module and quiz me on it.')">Ask Coverage Coach</button></div></div></div>`}
 async function showLesson(slug){
   const l=await api('/api/lessons/'+slug);
   const saved=l.progress||{completed:false,confidence:0,notes:'',saved_for_review:false};
@@ -541,17 +541,15 @@ async function showDashboard(){app.classList.remove('ws-locked');
 
   const course=me&&me.course==='lh'?'lh':'pc';
   const stInfo=me&&me.state?await api('/api/state-info/'+me.state).catch(()=>null):null;
-  const examKey=course==='lh'?'lh_exam':'pc_exam';
-  const examData=stInfo&&stInfo[examKey];
   const stateBanner=stInfo
     ?`<div class="state-banner" id="stateBanner">
         <span class="state-banner-loc">📍 <strong>${esc(stInfo.state_name)}</strong> <span class="state-banner-vendor">(${esc(stInfo.vendor)})</span></span>
         <span class="state-banner-sep">·</span>
-        <span class="state-banner-exam">${course==='lh'?'L&H':'P&C'}: ${examData?examData.total_scored+' questions · '+examData.passing_score+'% to pass':'—'}</span>
+        <span class="state-banner-exam">${course==='lh'?'L&H':'P&C'}: ${esc(examProfileSummary(stInfo,course))}</span>
         <span class="state-banner-sep">·</span>
         <button class="state-banner-btn" onclick="document.getElementById('stateTopics').classList.toggle('state-topics-open')">State topics ▾</button>
         <button class="state-banner-btn" onclick="stateSelector({dashboard:true,back:true})">Change state</button>
-        <div class="state-topics" id="stateTopics"><ul>${(stInfo.state_topics||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>${stInfo.outline_url?`<a href="${esc(stInfo.outline_url)}" target="_blank" rel="noopener" class="state-outline-link">View official exam outline →</a>`:''}</div>
+        <div class="state-topics" id="stateTopics"><p>State-law question review is pending.</p><ul>${(stInfo.state_topics||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>${stInfo.outline_url?`<a href="${esc(stInfo.outline_url)}" target="_blank" rel="noopener" class="state-outline-link">View source handbook →</a>`:''}</div>
       </div>`
     :`<div class="state-banner state-banner-empty"><span>📍 </span><button class="state-banner-btn" onclick="stateSelector({dashboard:true,back:true})">Select your state to see your exam details →</button></div>`;
 
@@ -642,4 +640,96 @@ async function speakText(text, voiceId, language) {
     console.warn('TTS playback error:', e);
     return null;
   }
+}
+
+function examProfileSummary(info,course){
+  const profiles=(info.profiles||[]).filter(p=>p.course===course);
+  if(!profiles.length)return 'Exam format awaiting verification';
+  return profiles.map(p=>`${p.name}: ${p.scored_questions} scored + up to ${p.pretest_questions_max} pretest, ${p.duration_minutes} min; passing scaled score ${p.passing_score}`).join(' · ') + ` (checked ${info.reviewed_at})`;
+}
+
+let timedExam=null, timedIndex=0, timedBusy=false, timedClock=null, timedOffset=0;
+async function timedExamSetup(){
+  clearInterval(timedClock);
+  const data=await api('/api/exams/active');
+  timedExam=data.exam;
+  app.innerHTML=`<div class="page-wrap"><div class="card"><h1>Timed practice</h1>
+    <p>50 questions · 60 minutes · ${esc(me.course==='lh'?'Life & Health':'Property & Casualty')}</p>
+    <p>Practice across general course topics. This session excludes state law and does not reproduce an official exam's topic weights or passing score.</p>
+    <p>Answers save as you go. The clock keeps running when you leave. Unanswered questions count as incorrect.</p>
+    ${timedExam?`<p>Your ${esc(timedExam.course.toUpperCase())} session is ${timedExam.status==='completed'?'finished':'in progress'}.</p><button class="primary" onclick="openTimedExam()">${timedExam.status==='completed'?'View results':'Resume session'}</button>`:''}
+    ${!timedExam||timedExam.status==='completed'?'<button class="primary" id="startTimedExam" onclick="startTimedExam()">Start 60-minute session</button>':''}
+    <button onclick="route('coach')">Back to workspace</button><p id="timedError" role="alert"></p></div></div>`;
+}
+async function startTimedExam(){
+  const button=document.getElementById('startTimedExam');if(button)button.disabled=true;
+  try{timedExam=await api('/api/exams',{method:'POST'});timedIndex=0;openTimedExam()}
+  catch(e){document.getElementById('timedError').textContent=e.message;if(button)button.disabled=false}
+}
+function openTimedExam(){
+  timedOffset=Date.parse(timedExam.server_now)-Date.now();
+  timedIndex=Math.min(timedIndex,timedExam.questions.length-1);
+  renderTimedExam();
+  clearInterval(timedClock);
+  if(timedExam.status!=='completed')timedClock=setInterval(tickTimedExam,1000);
+}
+function renderTimedExam(){
+  if(timedExam.status==='completed'){
+    clearInterval(timedClock);
+    const result=timedExam.result;
+    app.innerHTML=`<div class="page-wrap"><div class="card"><h1>Practice results</h1>
+      <h2>${result.correct} / ${timedExam.total_questions} · ${result.percent}%</h2><p>${esc(timedExam.notice)}</p>
+      <h3>Topic results</h3><ul>${Object.entries(result.module_scores).map(([name,r])=>`<li>${esc(name)}: ${r.correct} / ${r.total}</li>`).join('')}</ul>
+      <button onclick="route('exam')">Another session</button><button onclick="route('coach')">Back to study</button>
+      ${timedExam.questions.map((q,i)=>`<details class="exam-result"><summary>${i+1}. ${q.is_correct?'Correct':q.selected_choice_id?'Incorrect':'Unanswered'} — ${esc(q.question_text)}</summary><ul>${q.choices.map(c=>`<li>${esc(c.choice_text)}${c.id===q.selected_choice_id?' (your answer)':''}${c.is_correct?' (correct)':''}${c.explanation?` — ${esc(c.explanation)}`:''}</li>`).join('')}</ul><p>${esc(q.explanation)}</p></details>`).join('')}
+      </div></div>`;return;
+  }
+  const q=timedExam.questions[timedIndex];
+  const selected=timedExam.answers[String(q.id)];
+  app.innerHTML=`<div class="page-wrap"><div class="card"><h1>Timed practice</h1>
+    <p><strong id="examTimer" role="timer"></strong> remaining · ${Object.keys(timedExam.answers).length} / ${timedExam.total_questions} answered</p>
+    <p class="muted">${esc(timedExam.course.toUpperCase())} · General practice; state law excluded</p>
+    <nav class="exam-grid" aria-label="Question navigation">${timedExam.questions.map((item,i)=>`<button ${timedBusy?'disabled':''} class="${i===timedIndex?'active':''}" aria-label="Question ${i+1}${timedExam.answers[String(item.id)]?' answered':''}${timedExam.flagged.includes(item.id)?' flagged':''}" onclick="timedIndex=${i};renderTimedExam()">${i+1}${timedExam.flagged.includes(item.id)?' ⚑':timedExam.answers[String(item.id)]?' ✓':''}</button>`).join('')}</nav>
+    <h2>Question ${timedIndex+1}</h2><p>${esc(q.question_text)}</p>
+    <div class="exam-choices">${q.choices.map(c=>`<button ${timedBusy?'disabled':''} aria-pressed="${selected===c.id}" class="${selected===c.id?'selected':''}" onclick="saveTimedAnswer(${q.id},${c.id})">${esc(c.choice_text)}</button>`).join('')}</div>
+    <button ${timedBusy?'disabled':''} aria-pressed="${timedExam.flagged.includes(q.id)}" onclick="flagTimedQuestion(${q.id})">${timedExam.flagged.includes(q.id)?'Remove review flag':'Flag for review'}</button>
+    <button ${timedBusy||timedIndex===0?'disabled':''} onclick="timedIndex--;renderTimedExam()">Previous</button>
+    <button ${timedBusy||timedIndex===timedExam.questions.length-1?'disabled':''} onclick="timedIndex++;renderTimedExam()">Next</button>
+    <button ${timedBusy?'disabled':''} onclick="reviewTimedSubmission()">Finish session</button>
+    <p id="timedSaveStatus" role="status">${timedBusy?'Saving…':'All displayed answers saved'}</p>
+    <div id="timedFinishReview"></div><p id="timedError" role="alert"></p></div></div>`;
+  tickTimedExam();
+}
+function reviewTimedSubmission(){
+  const unanswered=timedExam.total_questions-Object.keys(timedExam.answers).length;
+  document.getElementById('timedFinishReview').innerHTML=`<p>${unanswered} unanswered; ${timedExam.flagged.length} flagged for review. Submitting ends this session.</p><button class="primary" onclick="persistTimedExam({},timedExam.flagged,true)">Submit final answers</button>`;
+}
+async function saveTimedAnswer(questionId,choiceId){await persistTimedExam({[questionId]:choiceId},timedExam.flagged)}
+async function flagTimedQuestion(questionId){
+  const flags=timedExam.flagged.includes(questionId)?timedExam.flagged.filter(id=>id!==questionId):[...timedExam.flagged,questionId];
+  await persistTimedExam({},flags);
+}
+async function persistTimedExam(answers,flagged,finish=false){
+  if(timedBusy)return;
+  timedBusy=true;renderTimedExam();
+  try{
+    timedExam=await api(`/api/exams/${timedExam.id}/${finish?'submit':'answers'}`,{method:finish?'POST':'PUT',body:JSON.stringify({revision:timedExam.revision,answers,flagged})});
+    timedOffset=Date.parse(timedExam.server_now)-Date.now();
+    timedBusy=false;renderTimedExam();
+  }catch(e){
+    timedBusy=false;renderTimedExam();
+    document.getElementById('timedSaveStatus').textContent='Last change was not confirmed. Reload saved answers before continuing.';
+    document.getElementById('timedError').innerHTML=`${esc(e.message)} <button onclick="reloadTimedExam()">Reload saved answers</button>`;
+  }
+}
+async function reloadTimedExam(){
+  try{timedExam=await api('/api/exams/'+timedExam.id);openTimedExam()}
+  catch(e){const error=document.getElementById('timedError');if(error)error.textContent=e.message}
+}
+function tickTimedExam(){
+  const timer=document.getElementById('examTimer');
+  if(!timer){clearInterval(timedClock);return}
+  const seconds=Math.max(0,Math.ceil((Date.parse(timedExam.deadline_at)-Date.now()-timedOffset)/1000));
+  timer.textContent=`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
+  if(seconds===0&&!timedBusy){clearInterval(timedClock);reloadTimedExam()}
 }
