@@ -833,63 +833,9 @@ BATCH2_QUESTIONS = {
 
 
 def load_batch2():
-    create_all()
-    db = SessionLocal()
-    try:
-        modules = {m.slug: m for m in db.scalars(select(Module)).all()}
-        lessons_by_module = {}
-        for slug, module in modules.items():
-            lessons = db.scalars(
-                select(Lesson).where(Lesson.module_id == module.id).order_by(Lesson.sort_order)
-            ).all()
-            lessons_by_module[slug] = lessons
-
-        # Safety check — don't add if already have a large bank
-        from sqlalchemy import func
-        existing_count = db.scalar(select(func.count()).select_from(Question))
-        if existing_count and existing_count > 100:
-            print(f"WARNING: DB already has {existing_count} questions. "
-                  f"Run purge_bad_questions.py first if needed.")
-            print("Proceeding to append batch 2 questions...")
-
-        loaded = 0
-        for module_slug, questions in BATCH2_QUESTIONS.items():
-            if module_slug not in modules:
-                print(f"  WARNING: Module '{module_slug}' not found — skipping")
-                continue
-            module = modules[module_slug]
-            lessons = lessons_by_module.get(module_slug, [])
-            first_lesson_id = lessons[0].id if lessons else None
-
-            for q_text, q_type, difficulty, explanation, choices in questions:
-                q = Question(
-                    module_id=module.id,
-                    lesson_id=first_lesson_id,
-                    question_text=q_text,
-                    question_type=q_type,
-                    difficulty=difficulty,
-                    explanation=explanation,
-                    is_active=True,
-                )
-                db.add(q)
-                db.flush()
-                for sort_order, (choice_text, is_correct, choice_explanation) in \
-                        enumerate(choices, start=1):
-                    db.add(AnswerChoice(
-                        question_id=q.id,
-                        choice_text=choice_text,
-                        is_correct=is_correct,
-                        explanation=choice_explanation,
-                        sort_order=sort_order,
-                    ))
-                loaded += 1
-
-        db.commit()
-        total = db.scalar(select(func.count()).select_from(Question))
-        print(f"Loaded {loaded} batch-2 questions.")
-        print(f"Total questions in DB: {total}")
-    finally:
-        db.close()
+    """Compatibility entry point: all imports use the non-destructive catalog."""
+    from scripts.sync_content import apply_content
+    apply_content()
 
 
 if __name__ == "__main__":

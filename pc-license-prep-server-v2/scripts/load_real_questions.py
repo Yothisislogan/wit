@@ -832,61 +832,9 @@ REAL_QUESTIONS = {
 
 
 def main():
-    create_all()
-    db = SessionLocal()
-    try:
-        # Remove all existing questions and choices.
-        # Guard: if the DB already looks clean (≤100 questions), skip the delete
-        # to avoid accidentally wiping a freshly-loaded set on a double-run.
-        existing = db.scalars(select(Question)).all()
-        deleted = 0
-        if len(existing) <= 100:
-            print(f"DB already has {len(existing)} questions (≤100) — skipping delete, reloading anyway.")
-        else:
-            for q in existing:
-                for c in q.choices:
-                    db.delete(c)
-                db.delete(q)
-                deleted += 1
-            db.flush()
-            print(f"Deleted {deleted} existing questions.")
-
-        loaded = 0
-        for module_slug, questions in REAL_QUESTIONS.items():
-            module = db.scalar(select(Module).where(Module.slug == module_slug))
-            if not module:
-                print(f"  WARNING: Module '{module_slug}' not found — skipping {len(questions)} questions.")
-                continue
-
-            # Find a lesson in this module to associate questions with (optional)
-            lesson = db.scalar(select(Lesson).where(Lesson.module_id == module.id))
-
-            for q_text, q_type, difficulty, explanation, choices in questions:
-                q = Question(
-                    module_id=module.id,
-                    lesson_id=lesson.id if lesson else None,
-                    question_text=q_text,
-                    question_type=q_type,
-                    difficulty=difficulty,
-                    explanation=explanation,
-                    is_active=True,
-                )
-                db.add(q)
-                db.flush()
-
-                for sort_order, (choice_text, is_correct, rationale) in enumerate(choices):
-                    db.add(AnswerChoice(
-                        question_id=q.id,
-                        choice_text=choice_text,
-                        is_correct=is_correct,
-                        sort_order=sort_order,
-                    ))
-                loaded += 1
-
-        db.commit()
-        print(f"Loaded {loaded} real exam questions across {len(REAL_QUESTIONS)} modules.")
-    finally:
-        db.close()
+    """Compatibility entry point: all imports use the non-destructive catalog."""
+    from scripts.sync_content import apply_content
+    apply_content()
 
 
 if __name__ == "__main__":
